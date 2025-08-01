@@ -12,7 +12,13 @@ export const getAllProperties = async (_req: Request, res: Response) => {
 
 export const createProperty = async (req: Request, res: Response) => {
   try {
-    const newProperty = new Property(req.body);
+    // Tomamos el body y calculamos el número de ambientes
+    const data = { ...req.body };
+    if (Array.isArray(data.ambientesList)) {
+      data.ambientes = data.ambientesList.length;
+    }
+
+    const newProperty = new Property(data);
     const savedProperty = await newProperty.save();
     res.status(201).json(savedProperty);
   } catch (error) {
@@ -34,7 +40,17 @@ export const getPropertyById = async (req: Request, res: Response) => {
 
 export const updateProperty = async (req: Request, res: Response) => {
   try {
-    const updated = await Property.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    // Preparamos los datos para update, recalculando ambientes
+    const data = { ...req.body };
+    if (Array.isArray(data.ambientesList)) {
+      data.ambientes = data.ambientesList.length;
+    }
+
+    const updated = await Property.findByIdAndUpdate(
+      req.params.id,
+      data,
+      { new: true }
+    );
     if (!updated) {
       return res.status(404).json({ message: "Property not found" });
     }
