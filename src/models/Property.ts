@@ -14,6 +14,7 @@ export interface IProperty extends Document {
   imageUrls: string[];
   videoUrls: string[];
   propertyType: string;
+  operationType: string;
   environments: number;
   bedrooms: number;
   bathrooms: number;
@@ -23,6 +24,11 @@ export interface IProperty extends Document {
   environmentsList: string[];
   services: string[];
   extras: string[];
+  floor?: string;
+  apartmentNumber?: string;
+  pricePerDay?: number;
+  pricePerWeek?: number;
+  pricePerMonth?: number;
 }
 
 const propertySchema = new Schema<IProperty>(
@@ -40,22 +46,23 @@ const propertySchema = new Schema<IProperty>(
     lat: Number,
     lng: Number,
     imageUrls: { type: [String], default: [] },
-
     videoUrls: { type: [String], default: [] },
-
     propertyType: { type: String, required: true },
+    operationType: { type: String, required: true },
     environments: { type: Number, required: true },
-
-    // definimos la lista de ambientes
     environmentsList: { type: [String], default: [] },
-
     bedrooms: { type: Number, required: true },
-    bathrooms: { type: Number, required: true },
-    condition: { type: String, required: true },
+    bathrooms: { type: Number },
+    condition: { type: String },
     age: { type: String, required: true },
     measuresList: { type: [String], required: true },
-    services: { type: [String] },
-    extras: { type: [String] },
+    services: { type: [String], default: [] },
+    extras: { type: [String], default: [] },
+    floor: { type: String },
+    apartmentNumber: { type: String },
+    pricePerDay: { type: Number },
+    pricePerWeek: { type: Number },
+    pricePerMonth: { type: Number },
   },
   { timestamps: true }
 );
