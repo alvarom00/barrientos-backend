@@ -1,9 +1,25 @@
 import { Request, Response } from "express";
 import { Property } from "../models/Property";
 
-export const getAllProperties = async (_req: Request, res: Response) => {
+export const getAllProperties = async (req: Request, res: Response) => {
   try {
-    const properties = await Property.find();
+    const { operationType, propertyType, query } = req.query;
+
+    // Armamos el filtro dinámico
+    const filter: any = {};
+
+    if (operationType) filter.operationType = operationType;
+    if (propertyType) filter.propertyType = propertyType;
+    if (query) {
+      filter.$or = [
+        { location: { $regex: query, $options: "i" } },
+        { title: { $regex: query, $options: "i" } },
+        { description: { $regex: query, $options: "i" } }
+        // Agregá más campos si querés buscar en más lugares
+      ];
+    }
+
+    const properties = await Property.find(filter);
     res.json(properties);
   } catch (error) {
     res.status(500).json({ message: "Error retrieving properties", error });
@@ -14,9 +30,6 @@ export const createProperty = async (req: Request, res: Response) => {
   try {
     // Tomamos el body y calculamos el número de ambientes
     const data = { ...req.body };
-    if (Array.isArray(data.ambientesList)) {
-      data.ambientes = data.ambientesList.length;
-    }
 
     const newProperty = new Property(data);
     const savedProperty = await newProperty.save();
@@ -42,9 +55,6 @@ export const updateProperty = async (req: Request, res: Response) => {
   try {
     // Preparamos los datos para update, recalculando ambientes
     const data = { ...req.body };
-    if (Array.isArray(data.ambientesList)) {
-      data.ambientes = data.ambientesList.length;
-    }
 
     const updated = await Property.findByIdAndUpdate(
       req.params.id,
