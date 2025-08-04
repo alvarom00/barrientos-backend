@@ -3,13 +3,12 @@ import { Property } from "../models/Property";
 
 export const getAllProperties = async (req: Request, res: Response) => {
   try {
-    const { operationType, propertyType, query } = req.query;
+    const { operationType, query } = req.query;
 
     // Armamos el filtro dinámico
     const filter: any = {};
 
     if (operationType) filter.operationType = operationType;
-    if (propertyType) filter.propertyType = propertyType;
     if (query) {
       filter.$or = [
         { location: { $regex: query, $options: "i" } },
