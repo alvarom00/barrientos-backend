@@ -20,7 +20,7 @@ export interface IProperty extends Document {
   bathrooms?: number;
   condition?: string;
   age?: string;
-  houseMeasures: string[];
+  houseMeasures: number;
   environmentsList?: string[];
   services: string[];
   extras: string[];
@@ -50,7 +50,7 @@ const propertySchema = new Schema<IProperty>(
     bathrooms: { type: Number },
     condition: { type: String },
     age: { type: String },
-    houseMeasures: { type: [String], required: true },
+    houseMeasures: { type: Number },
     services: { type: [String], default: [] },
     extras: { type: [String], default: [] },
   },
