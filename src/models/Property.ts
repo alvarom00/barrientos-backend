@@ -24,6 +24,8 @@ export interface IProperty extends Document {
   environmentsList?: string[];
   services: string[];
   extras: string[];
+  resetPasswordToken: string;
+  resetPasswordExpires: number;
 }
 
 const propertySchema = new Schema<IProperty>(
@@ -53,6 +55,8 @@ const propertySchema = new Schema<IProperty>(
     houseMeasures: { type: Number },
     services: { type: [String], default: [] },
     extras: { type: [String], default: [] },
+    resetPasswordToken: { type: String },
+    resetPasswordExpires: { type: Number },
   },
   { timestamps: true }
 );

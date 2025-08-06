@@ -3,6 +3,8 @@ import cors from "cors";
 import morgan from "morgan";
 import propertyRoutes from "./routes/property.routes";
 import path from "path";
+import authRoutes from './routes/auth';
+import { sendEmail } from "./utils/sendEmail";
 
 const app = express();
 
@@ -14,6 +16,7 @@ app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
 
 // Routes
 app.use("/api/properties", propertyRoutes);
+app.use('/api/auth', authRoutes);
 
 // Ruta de prueba
 app.get("/", (_req, res) => {
