@@ -8,25 +8,31 @@ interface MulterFiles {
 
 export const getAllProperties = async (req: Request, res: Response) => {
   try {
-    const { operationType, query } = req.query;
+    const page = parseInt(req.query.page as string) || 1;
+    const pageSize = parseInt(req.query.pageSize as string) || 8;
+    const operationType = req.query.operationType as string | undefined;
+    const search = req.query.search as string | undefined;
 
-    // Armamos el filtro dinámico
     const filter: any = {};
-
     if (operationType) filter.operationType = operationType;
-    if (query) {
+
+    if (search) {
       filter.$or = [
-        { location: { $regex: query, $options: "i" } },
-        { title: { $regex: query, $options: "i" } },
-        { description: { $regex: query, $options: "i" } },
-        // Agregá más campos si querés buscar en más lugares
+        { ref: { $regex: search, $options: "i" } },
+        { title: { $regex: search, $options: "i" } },
+        { location: { $regex: search, $options: "i" } },
       ];
     }
 
-    const properties = await Property.find(filter);
-    res.json(properties);
-  } catch (error) {
-    res.status(500).json({ message: "Error retrieving properties", error });
+    const total = await Property.countDocuments(filter);
+    const properties = await Property.find(filter)
+      .skip((page - 1) * pageSize)
+      .limit(pageSize)
+      .lean();
+
+    res.json({ total, properties });
+  } catch (err) {
+    res.status(500).json({ error: "Error fetching properties" });
   }
 };
 
@@ -198,12 +204,10 @@ export const updateProperty = async (req: Request, res: Response) => {
     res.json(updated);
   } catch (error: any) {
     console.error("Error updating property:", error);
-    res
-      .status(500)
-      .json({
-        message: "Error updating property",
-        error: error.message || error,
-      });
+    res.status(500).json({
+      message: "Error updating property",
+      error: error.message || error,
+    });
   }
 };
 
