@@ -64,7 +64,7 @@ router.post("/forgot-password", async (req, res) => {
   // Generar token seguro (y almacenar en DB con expiración)
   const token = crypto.randomBytes(32).toString("hex");
   user.resetPasswordToken = token;
-  user.resetPasswordExpires = Date.now() + 1000 * 60 * 60; // 1 hora
+  user.resetPasswordExpires = Date.now() + 1000 * 60 * 60;
   await user.save();
 
   const resetUrl = `http://localhost:5173/reset-password?token=${token}`;

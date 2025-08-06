@@ -15,7 +15,6 @@ const UserSchema = new Schema<IUser>({
   resetPasswordExpires: { type: Number },
 });
 
-// Método para comparar contraseña
 UserSchema.methods.comparePassword = async function (candidate: string) {
   const bcrypt = require("bcryptjs");
   return bcrypt.compare(candidate, this.passwordHash);
