@@ -1,5 +1,6 @@
 # Node.js
 node_modules/
+/Uploads/
 dist/
 .env
 
@@ -14,5 +15,3 @@ yarn-error.log*
 # VSCode
 .vscode/
 
-
-/Uploads/
