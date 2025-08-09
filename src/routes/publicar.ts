@@ -1,22 +1,21 @@
-// routes/publicar.ts
 import { Router, Request, Response } from "express";
-import { sendEmail } from "../utils/sendEmail"; // ajusta el import si tu path es distinto
+import { sendEmail } from "../utils/sendEmail";
 
 const router = Router();
 
-// Recibe los datos del formulario y envía el mail al admin
 router.post("/", async (req: Request, res: Response) => {
   const form = req.body;
-  // Aquí puedes validar los campos si quieres más seguridad
 
   try {
-    // Armar el contenido del email en HTML o texto plano
+    const queres = form.queres === "Ambas" ? "Vender y Arrendar" : form.queres;
+
     const html = `
       <h2>Nuevo formulario recibido desde Publicar</h2>
       <ul>
         <li><b>Nombre y Apellido:</b> ${form.nombre}</li>
         <li><b>Email:</b> ${form.email}</li>
         <li><b>Es:</b> ${form.eres}</li>
+        <li><b>Quiere:</b> ${queres}</li>
         <li><b>Ubicación del campo:</b> ${form.ubicacion}</li>
         <li><b>Superficie total:</b> ${form.superficie}</li>
         <li><b>Tipo de campo:</b> ${form.tipoCampo}</li>
@@ -31,7 +30,7 @@ router.post("/", async (req: Request, res: Response) => {
     `;
 
     await sendEmail({
-      to: process.env.ADMIN_EMAIL!, // o tu mail real
+      to: process.env.ADMIN_EMAIL!,
       subject: "Nuevo formulario de publicación de campo",
       html,
     });
