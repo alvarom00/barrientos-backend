@@ -1,36 +1,21 @@
+// src/routes/property.routes.ts
 import { Router } from "express";
-import { requireAuth } from "../middleware/auth";
-import upload from "../services/fileStorage";
 import {
-  getAllProperties,
-  createProperty,
+  getProperties,
   getPropertyById,
+  createProperty,
   updateProperty,
   deleteProperty,
 } from "../controllers/property.controller";
+import { uploadImages } from "../services/fileStorage";
+// import { isAuth } from "../middleware/auth"; // si querés proteger
 
 const router = Router();
 
-// --------- Rutas públicas (lectura)
-router.get("/", getAllProperties);
+router.get("/", getProperties);
 router.get("/:id", getPropertyById);
-
-// --------- Rutas protegidas (mutaciones)
-// IMPORTANTE: sólo aceptamos imágenes; los videos ahora son URLs
-router.post(
-  "/",
-  requireAuth,
-  upload.fields([{ name: "images", maxCount: 10 }]),
-  createProperty
-);
-
-router.put(
-  "/:id",
-  requireAuth,
-  upload.fields([{ name: "images", maxCount: 10 }]),
-  updateProperty
-);
-
-router.delete("/:id", requireAuth, deleteProperty);
+router.post("/", uploadImages.array("images", 15), createProperty);
+router.put("/:id", uploadImages.array("images", 15), updateProperty);
+router.delete("/:id", deleteProperty);
 
 export default router;

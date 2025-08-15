@@ -1,264 +1,223 @@
-import { Request, Response } from "express";
+import type { Request, Response } from "express";
 import Property from "../models/Property";
-import fs from "node:fs/promises";
-import path from "node:path";
+import { uploadImageBufferToCloudinary } from "../services/fileStorage";
+import { normalizeVideoUrls } from "../utils/videoUrls";
+import { v2 as cloudinary } from "cloudinary";
 
-// ---------- Helpers
-
-function toArray<T = string>(v: any): T[] {
-  if (Array.isArray(v)) return v;
-  if (v === undefined || v === null || v === "") return [];
-  return [v];
-}
-
-function toNumberOrNull(v: any): number | null {
-  if (v === undefined || v === null || v === "") return null;
+/** helpers parse */
+function toNum(v: unknown): number | undefined {
+  if (v === undefined || v === null || v === "") return undefined;
   const n = Number(v);
-  return Number.isFinite(n) ? n : null;
+  return Number.isNaN(n) ? undefined : n;
+}
+function parseStringArray(val: unknown): string[] {
+  if (Array.isArray(val)) return val.map(String);
+  if (typeof val === "string") {
+    try {
+      const parsed = JSON.parse(val);
+      if (Array.isArray(parsed)) return parsed.map(String);
+    } catch {}
+    return val.split(",").map((s) => s.trim()).filter(Boolean);
+  }
+  return [];
 }
 
-function isUploadRelativeUrl(u: string) {
-  return typeof u === "string" && /^\/?uploads\//i.test(u);
-}
-
-async function deleteImageFileIfExists(relUrl: string) {
-  // relUrl esperado: "/uploads/images/xxxxx.jpg"
+/** GET /properties */
+export async function getProperties(req: Request, res: Response) {
   try {
-    const safe = relUrl.replace(/^\/+/, ""); // "uploads/images/xxxxx.jpg"
-    // evitamos escapes fuera del dir de trabajo
-    const full = path.resolve(process.cwd(), safe);
-    // por seguridad, sólo borra dentro de /uploads
-    if (!full.includes(path.resolve(process.cwd(), "uploads" + path.sep))) return;
-    await fs.unlink(full).catch(() => {});
-  } catch {
-    // ignorar
+    const page = Math.max(parseInt(String(req.query.page || 1), 10), 1);
+    const pageSize = Math.min(
+      Math.max(parseInt(String(req.query.pageSize || 10), 10), 1),
+      50
+    );
+
+    const search = String(req.query.search || "").trim();
+    const operationType = String(req.query.operationType || "").trim();
+
+    const filters: any = {};
+    if (operationType) filters.operationType = operationType;
+    if (search) {
+      const rx = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+      filters.$or = [{ ref: rx }, { title: rx }, { location: rx }, { description: rx }];
+    }
+
+    const [items, total] = await Promise.all([
+      Property.find(filters)
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * pageSize)
+        .limit(pageSize)
+        .lean({ virtuals: true }),
+      Property.countDocuments(filters),
+    ]);
+
+    // devolvemos imageUrls virtual + todo lo demás
+    const properties = items.map((p: any) => ({
+      ...p,
+      imageUrls: (p.images || []).map((i: any) => i.url),
+    }));
+
+    res.json({ properties, total });
+  } catch (err) {
+    console.error("getProperties error:", err);
+    res.status(500).json({ message: "Error obteniendo propiedades" });
   }
 }
 
-// ===================================================
-//                      Controllers
-// ===================================================
-
-export async function getAllProperties(req: Request, res: Response) {
-  try {
-    const {
-      page = "1",
-      pageSize = "12",
-      search = "",
-      operationType,
-    } = req.query as Record<string, string>;
-
-    const _page = Math.max(1, parseInt(String(page), 10) || 1);
-    const _pageSize = Math.max(1, Math.min(100, parseInt(String(pageSize), 10) || 12));
-
-    const filter: any = {};
-    if (operationType && ["Venta", "Arrendamiento"].includes(operationType)) {
-      filter.operationType = operationType;
-    }
-    if (search && search.trim()) {
-      // índice de texto recomendado en title/location
-      filter.$text = { $search: search.trim() };
-    }
-
-    const cursor = Property.find(filter);
-
-    if (filter.$text) {
-      // si usamos texto, ordenamos por score
-      // @ts-ignore
-      cursor.sort({ score: { $meta: "textScore" } });
-      // @ts-ignore
-      cursor.select({ score: { $meta: "textScore" } });
-    } else {
-      cursor.sort({ createdAt: -1 });
-    }
-
-    const total = await Property.countDocuments(filter);
-    const items = await cursor
-      .skip((_page - 1) * _pageSize)
-      .limit(_pageSize)
-      .lean();
-
-    res.json({
-      properties: items,
-      total,
-      page: _page,
-      pageSize: _pageSize,
-    });
-  } catch (e: any) {
-    res.status(500).json({ message: e.message || "Error listando propiedades" });
-  }
-}
-
+/** GET /properties/:id */
 export async function getPropertyById(req: Request, res: Response) {
   try {
-    const item = await Property.findById(req.params.id).lean();
-    if (!item) return res.status(404).json({ message: "Propiedad no encontrada" });
-    res.json(item);
-  } catch (e: any) {
-    res.status(500).json({ message: e.message || "Error obteniendo propiedad" });
+    const prop: any = await Property.findById(req.params.id).lean({ virtuals: true });
+    if (!prop) return res.status(404).json({ message: "Propiedad no encontrada" });
+
+    prop.imageUrls = (prop.images || []).map((i: any) => i.url);
+    res.json(prop);
+  } catch (err) {
+    console.error("getPropertyById error:", err);
+    res.status(500).json({ message: "Error obteniendo la propiedad" });
   }
 }
 
+/** POST /properties  (usa uploadImages.array('images')) */
 export async function createProperty(req: Request, res: Response) {
   try {
-    const body = req.body || {};
+    const files = (req.files as Express.Multer.File[]) || [];
+    const images: { url: string; publicId: string }[] = [];
 
-    // Normalizar listas
-    const services = toArray<string>(body["services[]"] ?? body.services);
-    const extras = toArray<string>(body["extras[]"] ?? body.extras);
-    const environmentsList = toArray<string>(
-      body["environmentsList[]"] ?? body.environmentsList
-    );
-    const videoUrls = toArray<string>(body["videoUrls[]"] ?? body.videoUrls)
-      .map((u) => (u ?? "").trim())
-      .filter(Boolean);
+    for (const f of files) {
+      const { secure_url, public_id } = await uploadImageBufferToCloudinary(
+        f.buffer,
+        f.originalname
+      );
+      images.push({ url: secure_url, publicId: public_id });
+    }
 
-    // Imágenes: existentes (none en create) + nuevas subidas
-    const files = (req.files as any) || {};
-    const imageFiles: Express.Multer.File[] = files.images || [];
-    const newImageUrls = imageFiles.map((f) => {
-      // tu fileStorage debería guardar en /uploads/images
-      return `/uploads/images/${f.filename}`;
-    });
-
-    const hasVivienda = extras.includes("Vivienda");
+    const videoUrls = normalizeVideoUrls(req.body.videoUrls);
 
     const doc = await Property.create({
-      title: body.title,
-      description: body.description ?? "",
-      operationType: body.operationType,
-      price: toNumberOrNull(body.price),
-      measure: Number(body.measure),
-      location: body.location,
-      lat: toNumberOrNull(body.lat),
-      lng: toNumberOrNull(body.lng),
-
-      services,
-      extras,
-
-      environments: hasVivienda ? toNumberOrNull(body.environments) : null,
-      environmentsList: hasVivienda ? environmentsList.filter(Boolean) : [],
-      bedrooms: hasVivienda ? toNumberOrNull(body.bedrooms) : null,
-      bathrooms: hasVivienda ? toNumberOrNull(body.bathrooms) : null,
-      condition: hasVivienda ? body.condition ?? null : null,
-      age: hasVivienda ? body.age ?? null : null,
-      houseMeasures: hasVivienda ? toNumberOrNull(body.houseMeasures) : null,
-
-      imageUrls: newImageUrls,      // sólo nuevas (no hay keep en create)
-      videoUrls,                    // 👉 URLs (no archivos)
+      ref: req.body.ref,
+      title: req.body.title,
+      description: req.body.description,
+      price: toNum(req.body.price),
+      measure: toNum(req.body.measure)!,
+      location: req.body.location,
+      lat: toNum(req.body.lat),
+      lng: toNum(req.body.lng),
+      propertyType: req.body.propertyType,
+      operationType: req.body.operationType,
+      environments: toNum(req.body.environments),
+      bedrooms: toNum(req.body.bedrooms),
+      bathrooms: toNum(req.body.bathrooms),
+      condition: req.body.condition,
+      age: req.body.age,
+      houseMeasures: parseStringArray(req.body.houseMeasures),
+      environmentsList: parseStringArray(req.body.environmentsList),
+      services: parseStringArray(req.body.services),
+      extras: parseStringArray(req.body.extras),
+      images,              // 👈 guardamos objetos con publicId
+      videoUrls,           // 👈 solo URLs
     });
 
-    res.status(201).json(doc);
-  } catch (e: any) {
-    res.status(400).json({ message: e.message || "Error al crear propiedad" });
+    const json: any = doc.toJSON({ virtuals: true });
+    json.imageUrls = images.map(i => i.url);
+    res.status(201).json(json);
+  } catch (err) {
+    console.error("createProperty error:", err);
+    res.status(500).json({ message: "Error creando propiedad" });
   }
 }
 
+/** PUT /properties/:id  (usa uploadImages.array('images')) */
 export async function updateProperty(req: Request, res: Response) {
   try {
-    const prop = await Property.findById(req.params.id);
+    const id = req.params.id;
+    const prop: any = await Property.findById(id);
     if (!prop) return res.status(404).json({ message: "Propiedad no encontrada" });
 
-    const body = req.body || {};
+    // URLs que el front quiere mantener (vienen como keepImages)
+    const keepImages = parseStringArray(req.body.keepImages);
 
-    // Normalizar listas
-    const services = toArray<string>(body["services[]"] ?? body.services);
-    const extras = toArray<string>(body["extras[]"] ?? body.extras);
-    const environmentsList = toArray<string>(
-      body["environmentsList[]"] ?? body.environmentsList
+    // determinar cuáles borrar en Cloudinary (las que existen pero no están en keep)
+    const toDelete = (prop.images || []).filter(
+      (img: any) => !keepImages.includes(img.url)
     );
-    const videoUrls = toArray<string>(body["videoUrls[]"] ?? body.videoUrls)
-      .map((u) => (u ?? "").trim())
-      .filter(Boolean);
 
-    // Imágenes: mantener las que vienen en keep + agregar nuevas; borrar las removidas del FS
-    const keepImages = toArray<string>(body.keepImages).filter(Boolean);
-    const files = (req.files as any) || {};
-    const imageFiles: Express.Multer.File[] = files.images || [];
-    const newImageUrls = imageFiles.map((f) => `/uploads/images/${f.filename}`);
+    // borrar en Cloudinary
+    for (const img of toDelete) {
+      try {
+        await cloudinary.uploader.destroy(img.publicId, { resource_type: "image" });
+      } catch (e) {
+        console.warn("No se pudo borrar en Cloudinary:", img.publicId, e);
+      }
+    }
 
-    // Calcular cuáles borrar del FS (las que estaban antes y ya no están en keep)
-    const toDelete = (prop.imageUrls || []).filter(
-      (u) => isUploadRelativeUrl(u) && !keepImages.includes(u)
+    // mantener las que quedan
+    let newImages: { url: string; publicId: string }[] = (prop.images || []).filter(
+      (img: any) => keepImages.includes(img.url)
     );
-    await Promise.all(toDelete.map((u) => deleteImageFileIfExists(u)));
 
-    const hasVivienda = extras.includes("Vivienda");
+    // agregar nuevas subidas
+    const newFiles = (req.files as Express.Multer.File[]) || [];
+    for (const f of newFiles) {
+      const { secure_url, public_id } = await uploadImageBufferToCloudinary(
+        f.buffer,
+        f.originalname
+      );
+      newImages.push({ url: secure_url, publicId: public_id });
+    }
 
-    prop.set({
-      title: body.title ?? prop.title,
-      description: body.description ?? prop.description,
-      operationType: body.operationType ?? prop.operationType,
-      price:
-        body.price !== undefined && body.price !== ""
-          ? toNumberOrNull(body.price)
-          : prop.price,
-      measure:
-        body.measure !== undefined && body.measure !== ""
-          ? Number(body.measure)
-          : prop.measure,
-      location: body.location ?? prop.location,
-      lat:
-        body.lat !== undefined && body.lat !== ""
-          ? toNumberOrNull(body.lat)
-          : prop.lat,
-      lng:
-        body.lng !== undefined && body.lng !== ""
-          ? toNumberOrNull(body.lng)
-          : prop.lng,
+    const videoUrls = normalizeVideoUrls(req.body.videoUrls);
 
-      services: services.length ? services : [],
-      extras: extras.length ? extras : [],
+    prop.ref = req.body.ref ?? prop.ref;
+    prop.title = req.body.title ?? prop.title;
+    prop.description = req.body.description ?? prop.description;
+    prop.price = toNum(req.body.price);
+    prop.measure = toNum(req.body.measure) ?? prop.measure;
+    prop.location = req.body.location ?? prop.location;
+    prop.lat = toNum(req.body.lat);
+    prop.lng = toNum(req.body.lng);
+    prop.propertyType = req.body.propertyType ?? prop.propertyType;
+    prop.operationType = req.body.operationType ?? prop.operationType;
+    prop.environments = toNum(req.body.environments);
+    prop.bedrooms = toNum(req.body.bedrooms);
+    prop.bathrooms = toNum(req.body.bathrooms);
+    prop.condition = req.body.condition ?? prop.condition;
+    prop.age = req.body.age ?? prop.age;
+    prop.houseMeasures = parseStringArray(req.body.houseMeasures);
+    prop.environmentsList = parseStringArray(req.body.environmentsList);
+    prop.services = parseStringArray(req.body.services);
+    prop.extras = parseStringArray(req.body.extras);
+    prop.images = newImages;
+    prop.videoUrls = videoUrls;
+    await prop.save();
 
-      environments: hasVivienda
-        ? (body.environments !== undefined && body.environments !== ""
-            ? toNumberOrNull(body.environments)
-            : prop.environments ?? null)
-        : null,
-      environmentsList: hasVivienda
-        ? (environmentsList.length ? environmentsList.filter(Boolean) : [])
-        : [],
-      bedrooms: hasVivienda
-        ? (body.bedrooms !== undefined && body.bedrooms !== ""
-            ? toNumberOrNull(body.bedrooms)
-            : prop.bedrooms ?? null)
-        : null,
-      bathrooms: hasVivienda
-        ? (body.bathrooms !== undefined && body.bathrooms !== ""
-            ? toNumberOrNull(body.bathrooms)
-            : prop.bathrooms ?? null)
-        : null,
-      condition: hasVivienda ? body.condition ?? null : null,
-      age: hasVivienda ? body.age ?? null : null,
-      houseMeasures: hasVivienda
-        ? (body.houseMeasures !== undefined && body.houseMeasures !== ""
-            ? toNumberOrNull(body.houseMeasures)
-            : prop.houseMeasures ?? null)
-        : null,
-
-      imageUrls: [...keepImages, ...newImageUrls],
-      videoUrls, // 👉 reemplazamos por lo que viene en el form
-    });
-
-    const saved = await prop.save();
-    res.json(saved);
-  } catch (e: any) {
-    res.status(400).json({ message: e.message || "Error al actualizar propiedad" });
+    const json: any = prop.toJSON({ virtuals: true });
+    json.imageUrls = (prop.images || []).map((i: any) => i.url);
+    res.json(json);
+  } catch (err) {
+    console.error("updateProperty error:", err);
+    res.status(500).json({ message: "Error actualizando propiedad" });
   }
 }
 
+/** DELETE /properties/:id  (borra imágenes en Cloudinary) */
 export async function deleteProperty(req: Request, res: Response) {
   try {
-    const prop = await Property.findById(req.params.id);
+    const prop: any = await Property.findById(req.params.id);
     if (!prop) return res.status(404).json({ message: "Propiedad no encontrada" });
 
-    // Borrar imágenes del FS
-    const toDelete = (prop.imageUrls || []).filter(isUploadRelativeUrl);
-    await Promise.all(toDelete.map((u) => deleteImageFileIfExists(u)));
+    // borrar todas las imágenes en Cloudinary
+    for (const img of prop.images || []) {
+      try {
+        await cloudinary.uploader.destroy(img.publicId, { resource_type: "image" });
+      } catch (e) {
+        console.warn("No se pudo borrar en Cloudinary:", img.publicId, e);
+      }
+    }
 
     await prop.deleteOne();
     res.json({ ok: true });
-  } catch (e: any) {
-    res.status(500).json({ message: e.message || "Error al borrar propiedad" });
+  } catch (err) {
+    console.error("deleteProperty error:", err);
+    res.status(500).json({ message: "Error eliminando propiedad" });
   }
 }

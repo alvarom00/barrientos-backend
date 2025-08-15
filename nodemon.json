@@ -1,5 +1,6 @@
 {
   "watch": ["src"],
-  "ext": ".ts",
-  "exec": "ts-node src/index.ts"
+  "ext": "ts,tsx,json",
+  "ignore": ["dist"],
+  "exec": "node --enable-source-maps -r ts-node/register/transpile-only src/index.ts"
 }

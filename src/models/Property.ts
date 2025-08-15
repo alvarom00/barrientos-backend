@@ -1,67 +1,51 @@
-import mongoose, { Schema, Document, Model } from "mongoose";
+import { Schema, model } from "mongoose";
 
-export interface IProperty extends Document {
-  title: string;
-  description?: string;
-  operationType: "Venta" | "Arrendamiento";
-  price?: number | null;
-  measure: number;
-  location: string;
-  lat?: number | null;
-  lng?: number | null;
-  services?: string[];
-  extras?: string[];
-
-  // Vivienda (opcionales y condicionales)
-  environments?: number | null;
-  environmentsList?: string[];
-  bedrooms?: number | null;
-  bathrooms?: number | null;
-  condition?: string | null;
-  age?: string | null;
-  houseMeasures?: number | null;
-
-  // Media
-  imageUrls: string[];   // rutas relativas a /uploads (se mantienen)
-  videoUrls: string[];   // 👉 ahora sólo URLs (YouTube/Vimeo/MP4/CDN), no archivos
-
-  createdAt?: Date;
-  updatedAt?: Date;
-}
-
-const PropertySchema = new Schema<IProperty>(
+const ImageSchema = new Schema(
   {
-    title: { type: String, required: true, trim: true },
-    description: { type: String, default: "" },
-    operationType: { type: String, enum: ["Venta", "Arrendamiento"], required: true },
-    price: { type: Number, default: null },
+    url: { type: String, required: true },
+    publicId: { type: String, required: true },
+  },
+  { _id: false }
+);
+
+const PropertySchema = new Schema(
+  {
+    ref: String,
+    title: { type: String, required: true },
+    description: String,
+    price: Number,
     measure: { type: Number, required: true },
-    location: { type: String, required: true, trim: true },
-    lat: { type: Number, default: null },
-    lng: { type: Number, default: null },
+    location: { type: String, required: true },
+    lat: Number,
+    lng: Number,
 
-    services: { type: [String], default: [] },
-    extras: { type: [String], default: [] },
+    // 👇 NUEVO: guardamos objetos con url + publicId
+    images: { type: [ImageSchema], default: [] },
 
-    environments: { type: Number, default: null },
-    environmentsList: { type: [String], default: [] },
-    bedrooms: { type: Number, default: null },
-    bathrooms: { type: Number, default: null },
-    condition: { type: String, default: null },
-    age: { type: String, default: null },
-    houseMeasures: { type: Number, default: null },
+    // seguimos guardando los videos como URLs
+    videoUrls: { type: [String], default: [] },
 
-    imageUrls: { type: [String], default: [] },
-    videoUrls: { type: [String], default: [] }, // 👈 URL strings
+    propertyType: String,
+    operationType: { type: String, enum: ["Venta", "Arrendamiento"] },
+    environments: Number,
+    bedrooms: Number,
+    bathrooms: Number,
+    condition: String,
+    age: String,
+    houseMeasures: [String],
+    environmentsList: [String],
+    services: [String],
+    extras: [String],
   },
   { timestamps: true }
 );
 
-// Índices útiles para listados/búsquedas
-PropertySchema.index({ operationType: 1, createdAt: -1 });
-PropertySchema.index({ title: "text", location: "text" });
+// Virtual para que el front reciba imageUrls: string[]
+PropertySchema.virtual("imageUrls").get(function () {
+  return (this.images || []).map((i: any) => i.url);
+});
 
-const Property: Model<IProperty> =
-  mongoose.models.Property || mongoose.model<IProperty>("Property", PropertySchema);
+PropertySchema.set("toJSON", { virtuals: true });
+PropertySchema.set("toObject", { virtuals: true });
 
-export default Property;
+export default model("Property", PropertySchema);
