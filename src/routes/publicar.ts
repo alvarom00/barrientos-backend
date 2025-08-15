@@ -22,8 +22,6 @@ router.post("/", async (req: Request, res: Response) => {
         <li><b>Precio estimado por hectárea:</b> ${form.precio}</li>
         <li><b>Características para destacar:</b> ${form.caracteristicas}</li>
         <li><b>¿Tiene escritura?:</b> ${form.documentacion}</li>
-        <li><b>¿Tiene fotos/videos?:</b> ${form.fotosVideos}</li>
-        <li><b>¿Publicar en redes?:</b> ${form.publicarRedes}</li>
         <li><b>Teléfono/WhatsApp:</b> ${form.telefono}</li>
         <li><b>Comentarios:</b> ${form.comentarios}</li>
       </ul>

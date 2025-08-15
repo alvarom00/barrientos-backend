@@ -1,64 +1,67 @@
-import { customAlphabet } from "nanoid";
-import { Schema, model, Document } from "mongoose";
-
-const nanoid = customAlphabet("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", 8);
+import mongoose, { Schema, Document, Model } from "mongoose";
 
 export interface IProperty extends Document {
-  ref: string;
   title: string;
   description?: string;
-  price?: number;
+  operationType: "Venta" | "Arrendamiento";
+  price?: number | null;
   measure: number;
   location: string;
-  lat?: number;
-  lng?: number;
-  imageUrls: string[];
-  videoUrls: string[];
-  operationType: string;
-  environments?: number;
-  bedrooms?: number;
-  bathrooms?: number;
-  condition?: string;
-  age?: string;
-  houseMeasures: number;
+  lat?: number | null;
+  lng?: number | null;
+  services?: string[];
+  extras?: string[];
+
+  // Vivienda (opcionales y condicionales)
+  environments?: number | null;
   environmentsList?: string[];
-  services: string[];
-  extras: string[];
-  resetPasswordToken: string;
-  resetPasswordExpires: number;
+  bedrooms?: number | null;
+  bathrooms?: number | null;
+  condition?: string | null;
+  age?: string | null;
+  houseMeasures?: number | null;
+
+  // Media
+  imageUrls: string[];   // rutas relativas a /uploads (se mantienen)
+  videoUrls: string[];   // 👉 ahora sólo URLs (YouTube/Vimeo/MP4/CDN), no archivos
+
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
-const propertySchema = new Schema<IProperty>(
+const PropertySchema = new Schema<IProperty>(
   {
-    ref: {
-      type: String,
-      required: true,
-      unique: true,
-      default: () => nanoid(),
-    },
-    title: { type: String, required: true },
-    description: String,
-    price: { type: Number },
+    title: { type: String, required: true, trim: true },
+    description: { type: String, default: "" },
+    operationType: { type: String, enum: ["Venta", "Arrendamiento"], required: true },
+    price: { type: Number, default: null },
     measure: { type: Number, required: true },
-    location: { type: String, required: true },
-    lat: Number,
-    lng: Number,
-    imageUrls: { type: [String], default: [] },
-    videoUrls: { type: [String], default: [] },
-    operationType: { type: String, required: true },
-    environments: { type: Number },
-    environmentsList: { type: [String], default: [] },
-    bedrooms: { type: Number },
-    bathrooms: { type: Number },
-    condition: { type: String },
-    age: { type: String },
-    houseMeasures: { type: Number },
+    location: { type: String, required: true, trim: true },
+    lat: { type: Number, default: null },
+    lng: { type: Number, default: null },
+
     services: { type: [String], default: [] },
     extras: { type: [String], default: [] },
-    resetPasswordToken: { type: String },
-    resetPasswordExpires: { type: Number },
+
+    environments: { type: Number, default: null },
+    environmentsList: { type: [String], default: [] },
+    bedrooms: { type: Number, default: null },
+    bathrooms: { type: Number, default: null },
+    condition: { type: String, default: null },
+    age: { type: String, default: null },
+    houseMeasures: { type: Number, default: null },
+
+    imageUrls: { type: [String], default: [] },
+    videoUrls: { type: [String], default: [] }, // 👈 URL strings
   },
   { timestamps: true }
 );
 
-export const Property = model<IProperty>("Property", propertySchema);
+// Índices útiles para listados/búsquedas
+PropertySchema.index({ operationType: 1, createdAt: -1 });
+PropertySchema.index({ title: "text", location: "text" });
+
+const Property: Model<IProperty> =
+  mongoose.models.Property || mongoose.model<IProperty>("Property", PropertySchema);
+
+export default Property;

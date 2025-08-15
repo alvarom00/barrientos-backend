@@ -11,25 +11,23 @@ import {
 
 const router = Router();
 
+// --------- Rutas públicas (lectura)
 router.get("/", getAllProperties);
 router.get("/:id", getPropertyById);
+
+// --------- Rutas protegidas (mutaciones)
+// IMPORTANTE: sólo aceptamos imágenes; los videos ahora son URLs
 router.post(
   "/",
   requireAuth,
-  upload.fields([
-    { name: "images", maxCount: 10 },
-    { name: "videos", maxCount: 5 },
-  ]),
+  upload.fields([{ name: "images", maxCount: 10 }]),
   createProperty
 );
 
 router.put(
   "/:id",
   requireAuth,
-  upload.fields([
-    { name: "images", maxCount: 10 },
-    { name: "videos", maxCount: 5 },
-  ]),
+  upload.fields([{ name: "images", maxCount: 10 }]),
   updateProperty
 );
 

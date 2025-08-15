@@ -1,224 +1,264 @@
 import { Request, Response } from "express";
-import { Property } from "../models/Property";
+import Property from "../models/Property";
+import fs from "node:fs/promises";
+import path from "node:path";
 
-interface MulterFiles {
-  images?: Express.Multer.File[];
-  videos?: Express.Multer.File[];
+// ---------- Helpers
+
+function toArray<T = string>(v: any): T[] {
+  if (Array.isArray(v)) return v;
+  if (v === undefined || v === null || v === "") return [];
+  return [v];
 }
 
-export const getAllProperties = async (req: Request, res: Response) => {
+function toNumberOrNull(v: any): number | null {
+  if (v === undefined || v === null || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function isUploadRelativeUrl(u: string) {
+  return typeof u === "string" && /^\/?uploads\//i.test(u);
+}
+
+async function deleteImageFileIfExists(relUrl: string) {
+  // relUrl esperado: "/uploads/images/xxxxx.jpg"
   try {
-    const page = parseInt(req.query.page as string) || 1;
-    const pageSize = parseInt(req.query.pageSize as string) || 8;
-    const operationType = req.query.operationType as string | undefined;
-    const search = req.query.search as string | undefined;
+    const safe = relUrl.replace(/^\/+/, ""); // "uploads/images/xxxxx.jpg"
+    // evitamos escapes fuera del dir de trabajo
+    const full = path.resolve(process.cwd(), safe);
+    // por seguridad, sólo borra dentro de /uploads
+    if (!full.includes(path.resolve(process.cwd(), "uploads" + path.sep))) return;
+    await fs.unlink(full).catch(() => {});
+  } catch {
+    // ignorar
+  }
+}
+
+// ===================================================
+//                      Controllers
+// ===================================================
+
+export async function getAllProperties(req: Request, res: Response) {
+  try {
+    const {
+      page = "1",
+      pageSize = "12",
+      search = "",
+      operationType,
+    } = req.query as Record<string, string>;
+
+    const _page = Math.max(1, parseInt(String(page), 10) || 1);
+    const _pageSize = Math.max(1, Math.min(100, parseInt(String(pageSize), 10) || 12));
 
     const filter: any = {};
-    if (operationType) filter.operationType = operationType;
+    if (operationType && ["Venta", "Arrendamiento"].includes(operationType)) {
+      filter.operationType = operationType;
+    }
+    if (search && search.trim()) {
+      // índice de texto recomendado en title/location
+      filter.$text = { $search: search.trim() };
+    }
 
-    if (search) {
-      filter.$or = [
-        { ref: { $regex: search, $options: "i" } },
-        { title: { $regex: search, $options: "i" } },
-        { location: { $regex: search, $options: "i" } },
-      ];
+    const cursor = Property.find(filter);
+
+    if (filter.$text) {
+      // si usamos texto, ordenamos por score
+      // @ts-ignore
+      cursor.sort({ score: { $meta: "textScore" } });
+      // @ts-ignore
+      cursor.select({ score: { $meta: "textScore" } });
+    } else {
+      cursor.sort({ createdAt: -1 });
     }
 
     const total = await Property.countDocuments(filter);
-    const properties = await Property.find(filter)
-      .skip((page - 1) * pageSize)
-      .limit(pageSize)
+    const items = await cursor
+      .skip((_page - 1) * _pageSize)
+      .limit(_pageSize)
       .lean();
 
-    res.json({ total, properties });
-  } catch (err) {
-    res.status(500).json({ error: "Error fetching properties" });
-  }
-};
-
-export const createProperty = async (req: Request, res: Response) => {
-  try {
-    const imageFiles = (req.files && (req.files as any).images) || [];
-    const videoFiles = (req.files && (req.files as any).videos) || [];
-    const imageUrls = imageFiles.map(
-      (file: any) => `/uploads/images/${file.filename}`
-    );
-    const videoUrls = videoFiles.map(
-      (file: any) => `/uploads/videos/${file.filename}`
-    );
-    const files = req.files as MulterFiles;
-    const {
-      title,
-      description,
-      price,
-      measure,
-      location,
-      lat,
-      lng,
-      operationType,
-      services,
-      extras,
-      environments,
-      environmentsList,
-      bedrooms,
-      bathrooms,
-      condition,
-      age,
-      houseMeasures,
-      keepImageUrls,
-      keepVideoUrls,
-    } = req.body;
-    const propertyData = {
-      title,
-      description,
-      price: price ? Number(price) : undefined,
-      measure: measure ? Number(measure) : undefined,
-      location,
-      lat: lat ? Number(lat) : undefined,
-      lng: lng ? Number(lng) : undefined,
-      operationType,
-      services: Array.isArray(services) ? services : services ? [services] : [],
-      extras: Array.isArray(extras) ? extras : extras ? [extras] : [],
-      environments: environments ? Number(environments) : undefined,
-      environmentsList: Array.isArray(environmentsList)
-        ? environmentsList
-        : environmentsList
-        ? [environmentsList]
-        : [],
-      bedrooms: bedrooms ? Number(bedrooms) : undefined,
-      bathrooms: bathrooms ? Number(bathrooms) : undefined,
-      condition,
-      age,
-      houseMeasures,
-      imageUrls,
-      videoUrls,
-    };
-    if (propertyData.price) propertyData.price = Number(propertyData.price);
-    if (propertyData.measure)
-      propertyData.measure = Number(propertyData.measure);
-    if (typeof propertyData.services === "string")
-      propertyData.services = [propertyData.services];
-    if (typeof propertyData.extras === "string")
-      propertyData.extras = [propertyData.extras];
-    const newProperty = new Property(propertyData);
-    const savedProperty = await newProperty.save();
-    res.status(201).json(savedProperty);
-  } catch (error) {
-    console.error(error);
-    res.status(400).json({ message: "Error creating property", error });
-  }
-};
-
-export const getPropertyById = async (req: Request, res: Response) => {
-  try {
-    const property = await Property.findById(req.params.id);
-    if (!property) {
-      return res.status(404).json({ message: "Property not found" });
-    }
-    res.json(property);
-  } catch (error) {
-    res.status(500).json({ message: "Error fetching property", error });
-  }
-};
-
-export const updateProperty = async (req: Request, res: Response) => {
-  try {
-    const files = req.files as MulterFiles;
-    // Notar que los campos ahora se llaman keepImages y keepVideos (plural)
-    const {
-      title,
-      description,
-      price,
-      measure,
-      location,
-      lat,
-      lng,
-      operationType,
-      services,
-      extras,
-      environments,
-      environmentsList,
-      bedrooms,
-      bathrooms,
-      condition,
-      age,
-      houseMeasures,
-      keepImages, // importante, plural!
-      keepVideos,
-    } = req.body;
-
-    const property = await Property.findById(req.params.id);
-    if (!property)
-      return res.status(404).json({ message: "Property not found" });
-
-    // Siempre convertir a array
-    const keepImageArr = Array.isArray(keepImages)
-      ? keepImages
-      : keepImages
-      ? [keepImages]
-      : [];
-
-    const keepVideoArr = Array.isArray(keepVideos)
-      ? keepVideos
-      : keepVideos
-      ? [keepVideos]
-      : [];
-
-    const newImages = files.images
-      ? files.images.map((file) => `/uploads/${file.filename}`)
-      : [];
-    const newVideos = files.videos
-      ? files.videos.map((file) => `/uploads/${file.filename}`)
-      : [];
-
-    const imageUrls = [...keepImageArr, ...newImages];
-    const videoUrls = [...keepVideoArr, ...newVideos];
-
-    const updateData = {
-      title,
-      description,
-      price,
-      measure,
-      location,
-      lat,
-      lng,
-      operationType,
-      services,
-      extras,
-      environments,
-      environmentsList,
-      bedrooms,
-      bathrooms,
-      condition,
-      age,
-      houseMeasures,
-      imageUrls,
-      videoUrls,
-    };
-
-    const updated = await Property.findByIdAndUpdate(
-      req.params.id,
-      updateData,
-      { new: true }
-    );
-    res.json(updated);
-  } catch (error: any) {
-    console.error("Error updating property:", error);
-    res.status(500).json({
-      message: "Error updating property",
-      error: error.message || error,
+    res.json({
+      properties: items,
+      total,
+      page: _page,
+      pageSize: _pageSize,
     });
+  } catch (e: any) {
+    res.status(500).json({ message: e.message || "Error listando propiedades" });
   }
-};
+}
 
-export const deleteProperty = async (req: Request, res: Response) => {
+export async function getPropertyById(req: Request, res: Response) {
   try {
-    const deleted = await Property.findByIdAndDelete(req.params.id);
-    if (!deleted) {
-      return res.status(404).json({ message: "Property not found" });
-    }
-    res.json({ message: "Property deleted successfully" });
-  } catch (error) {
-    res.status(500).json({ message: "Error deleting property", error });
+    const item = await Property.findById(req.params.id).lean();
+    if (!item) return res.status(404).json({ message: "Propiedad no encontrada" });
+    res.json(item);
+  } catch (e: any) {
+    res.status(500).json({ message: e.message || "Error obteniendo propiedad" });
   }
-};
+}
+
+export async function createProperty(req: Request, res: Response) {
+  try {
+    const body = req.body || {};
+
+    // Normalizar listas
+    const services = toArray<string>(body["services[]"] ?? body.services);
+    const extras = toArray<string>(body["extras[]"] ?? body.extras);
+    const environmentsList = toArray<string>(
+      body["environmentsList[]"] ?? body.environmentsList
+    );
+    const videoUrls = toArray<string>(body["videoUrls[]"] ?? body.videoUrls)
+      .map((u) => (u ?? "").trim())
+      .filter(Boolean);
+
+    // Imágenes: existentes (none en create) + nuevas subidas
+    const files = (req.files as any) || {};
+    const imageFiles: Express.Multer.File[] = files.images || [];
+    const newImageUrls = imageFiles.map((f) => {
+      // tu fileStorage debería guardar en /uploads/images
+      return `/uploads/images/${f.filename}`;
+    });
+
+    const hasVivienda = extras.includes("Vivienda");
+
+    const doc = await Property.create({
+      title: body.title,
+      description: body.description ?? "",
+      operationType: body.operationType,
+      price: toNumberOrNull(body.price),
+      measure: Number(body.measure),
+      location: body.location,
+      lat: toNumberOrNull(body.lat),
+      lng: toNumberOrNull(body.lng),
+
+      services,
+      extras,
+
+      environments: hasVivienda ? toNumberOrNull(body.environments) : null,
+      environmentsList: hasVivienda ? environmentsList.filter(Boolean) : [],
+      bedrooms: hasVivienda ? toNumberOrNull(body.bedrooms) : null,
+      bathrooms: hasVivienda ? toNumberOrNull(body.bathrooms) : null,
+      condition: hasVivienda ? body.condition ?? null : null,
+      age: hasVivienda ? body.age ?? null : null,
+      houseMeasures: hasVivienda ? toNumberOrNull(body.houseMeasures) : null,
+
+      imageUrls: newImageUrls,      // sólo nuevas (no hay keep en create)
+      videoUrls,                    // 👉 URLs (no archivos)
+    });
+
+    res.status(201).json(doc);
+  } catch (e: any) {
+    res.status(400).json({ message: e.message || "Error al crear propiedad" });
+  }
+}
+
+export async function updateProperty(req: Request, res: Response) {
+  try {
+    const prop = await Property.findById(req.params.id);
+    if (!prop) return res.status(404).json({ message: "Propiedad no encontrada" });
+
+    const body = req.body || {};
+
+    // Normalizar listas
+    const services = toArray<string>(body["services[]"] ?? body.services);
+    const extras = toArray<string>(body["extras[]"] ?? body.extras);
+    const environmentsList = toArray<string>(
+      body["environmentsList[]"] ?? body.environmentsList
+    );
+    const videoUrls = toArray<string>(body["videoUrls[]"] ?? body.videoUrls)
+      .map((u) => (u ?? "").trim())
+      .filter(Boolean);
+
+    // Imágenes: mantener las que vienen en keep + agregar nuevas; borrar las removidas del FS
+    const keepImages = toArray<string>(body.keepImages).filter(Boolean);
+    const files = (req.files as any) || {};
+    const imageFiles: Express.Multer.File[] = files.images || [];
+    const newImageUrls = imageFiles.map((f) => `/uploads/images/${f.filename}`);
+
+    // Calcular cuáles borrar del FS (las que estaban antes y ya no están en keep)
+    const toDelete = (prop.imageUrls || []).filter(
+      (u) => isUploadRelativeUrl(u) && !keepImages.includes(u)
+    );
+    await Promise.all(toDelete.map((u) => deleteImageFileIfExists(u)));
+
+    const hasVivienda = extras.includes("Vivienda");
+
+    prop.set({
+      title: body.title ?? prop.title,
+      description: body.description ?? prop.description,
+      operationType: body.operationType ?? prop.operationType,
+      price:
+        body.price !== undefined && body.price !== ""
+          ? toNumberOrNull(body.price)
+          : prop.price,
+      measure:
+        body.measure !== undefined && body.measure !== ""
+          ? Number(body.measure)
+          : prop.measure,
+      location: body.location ?? prop.location,
+      lat:
+        body.lat !== undefined && body.lat !== ""
+          ? toNumberOrNull(body.lat)
+          : prop.lat,
+      lng:
+        body.lng !== undefined && body.lng !== ""
+          ? toNumberOrNull(body.lng)
+          : prop.lng,
+
+      services: services.length ? services : [],
+      extras: extras.length ? extras : [],
+
+      environments: hasVivienda
+        ? (body.environments !== undefined && body.environments !== ""
+            ? toNumberOrNull(body.environments)
+            : prop.environments ?? null)
+        : null,
+      environmentsList: hasVivienda
+        ? (environmentsList.length ? environmentsList.filter(Boolean) : [])
+        : [],
+      bedrooms: hasVivienda
+        ? (body.bedrooms !== undefined && body.bedrooms !== ""
+            ? toNumberOrNull(body.bedrooms)
+            : prop.bedrooms ?? null)
+        : null,
+      bathrooms: hasVivienda
+        ? (body.bathrooms !== undefined && body.bathrooms !== ""
+            ? toNumberOrNull(body.bathrooms)
+            : prop.bathrooms ?? null)
+        : null,
+      condition: hasVivienda ? body.condition ?? null : null,
+      age: hasVivienda ? body.age ?? null : null,
+      houseMeasures: hasVivienda
+        ? (body.houseMeasures !== undefined && body.houseMeasures !== ""
+            ? toNumberOrNull(body.houseMeasures)
+            : prop.houseMeasures ?? null)
+        : null,
+
+      imageUrls: [...keepImages, ...newImageUrls],
+      videoUrls, // 👉 reemplazamos por lo que viene en el form
+    });
+
+    const saved = await prop.save();
+    res.json(saved);
+  } catch (e: any) {
+    res.status(400).json({ message: e.message || "Error al actualizar propiedad" });
+  }
+}
+
+export async function deleteProperty(req: Request, res: Response) {
+  try {
+    const prop = await Property.findById(req.params.id);
+    if (!prop) return res.status(404).json({ message: "Propiedad no encontrada" });
+
+    // Borrar imágenes del FS
+    const toDelete = (prop.imageUrls || []).filter(isUploadRelativeUrl);
+    await Promise.all(toDelete.map((u) => deleteImageFileIfExists(u)));
+
+    await prop.deleteOne();
+    res.json({ ok: true });
+  } catch (e: any) {
+    res.status(500).json({ message: e.message || "Error al borrar propiedad" });
+  }
+}
