@@ -7,7 +7,8 @@ import { sendEmail } from "../utils/sendEmail";
 import crypto from "crypto";
 
 const router = Router();
-const frontend = process.env.FRONTEND_ORIGIN || "http://localhost:5173";
+const frontend =
+  (process.env.FRONTEND_ORIGIN || "http://localhost:5173").replace(/\/$/, "");
 
 // REGISTRO (usar solo para crear el admin una vez, luego borrar o proteger)
 router.post("/register", async (req: Request, res: Response) => {

@@ -3,6 +3,17 @@ import Property from "../models/Property";
 import { uploadImageBufferToCloudinary } from "../services/fileStorage";
 import { normalizeVideoUrls } from "../utils/videoUrls";
 import { v2 as cloudinary } from "cloudinary";
+import { customAlphabet } from "nanoid";
+
+const nano = customAlphabet("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", 6);
+
+async function generateUniqueRef() {
+  let ref = "";
+  do {
+    ref = `BARR-${new Date().getFullYear()}-${nano()}`;
+  } while (await Property.exists({ ref }));
+  return ref;
+}
 
 /** helpers parse */
 function toNum(v: unknown): number | undefined {
@@ -17,7 +28,10 @@ function parseStringArray(val: unknown): string[] {
       const parsed = JSON.parse(val);
       if (Array.isArray(parsed)) return parsed.map(String);
     } catch {}
-    return val.split(",").map((s) => s.trim()).filter(Boolean);
+    return val
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
   }
   return [];
 }
@@ -38,7 +52,12 @@ export async function getProperties(req: Request, res: Response) {
     if (operationType) filters.operationType = operationType;
     if (search) {
       const rx = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
-      filters.$or = [{ ref: rx }, { title: rx }, { location: rx }, { description: rx }];
+      filters.$or = [
+        { ref: rx },
+        { title: rx },
+        { location: rx },
+        { description: rx },
+      ];
     }
 
     const [items, total] = await Promise.all([
@@ -66,8 +85,11 @@ export async function getProperties(req: Request, res: Response) {
 /** GET /properties/:id */
 export async function getPropertyById(req: Request, res: Response) {
   try {
-    const prop: any = await Property.findById(req.params.id).lean({ virtuals: true });
-    if (!prop) return res.status(404).json({ message: "Propiedad no encontrada" });
+    const prop: any = await Property.findById(req.params.id).lean({
+      virtuals: true,
+    });
+    if (!prop)
+      return res.status(404).json({ message: "Propiedad no encontrada" });
 
     prop.imageUrls = (prop.images || []).map((i: any) => i.url);
     res.json(prop);
@@ -82,6 +104,8 @@ export async function createProperty(req: Request, res: Response) {
   try {
     const files = (req.files as Express.Multer.File[]) || [];
     const images: { url: string; publicId: string }[] = [];
+    const ref = req.body.ref?.trim();
+    const finalRef = ref && ref.length > 0 ? ref : await generateUniqueRef();
 
     for (const f of files) {
       const { secure_url, public_id } = await uploadImageBufferToCloudinary(
@@ -94,7 +118,7 @@ export async function createProperty(req: Request, res: Response) {
     const videoUrls = normalizeVideoUrls(req.body.videoUrls);
 
     const doc = await Property.create({
-      ref: req.body.ref,
+      ref: finalRef,
       title: req.body.title,
       description: req.body.description,
       price: toNum(req.body.price),
@@ -113,12 +137,12 @@ export async function createProperty(req: Request, res: Response) {
       environmentsList: parseStringArray(req.body.environmentsList),
       services: parseStringArray(req.body.services),
       extras: parseStringArray(req.body.extras),
-      images,              // 👈 guardamos objetos con publicId
-      videoUrls,           // 👈 solo URLs
+      images, // 👈 guardamos objetos con publicId
+      videoUrls, // 👈 solo URLs
     });
 
     const json: any = doc.toJSON({ virtuals: true });
-    json.imageUrls = images.map(i => i.url);
+    json.imageUrls = images.map((i) => i.url);
     res.status(201).json(json);
   } catch (err) {
     console.error("createProperty error:", err);
@@ -131,7 +155,8 @@ export async function updateProperty(req: Request, res: Response) {
   try {
     const id = req.params.id;
     const prop: any = await Property.findById(id);
-    if (!prop) return res.status(404).json({ message: "Propiedad no encontrada" });
+    if (!prop)
+      return res.status(404).json({ message: "Propiedad no encontrada" });
 
     // URLs que el front quiere mantener (vienen como keepImages)
     const keepImages = parseStringArray(req.body.keepImages);
@@ -144,16 +169,18 @@ export async function updateProperty(req: Request, res: Response) {
     // borrar en Cloudinary
     for (const img of toDelete) {
       try {
-        await cloudinary.uploader.destroy(img.publicId, { resource_type: "image" });
+        await cloudinary.uploader.destroy(img.publicId, {
+          resource_type: "image",
+        });
       } catch (e) {
         console.warn("No se pudo borrar en Cloudinary:", img.publicId, e);
       }
     }
 
     // mantener las que quedan
-    let newImages: { url: string; publicId: string }[] = (prop.images || []).filter(
-      (img: any) => keepImages.includes(img.url)
-    );
+    let newImages: { url: string; publicId: string }[] = (
+      prop.images || []
+    ).filter((img: any) => keepImages.includes(img.url));
 
     // agregar nuevas subidas
     const newFiles = (req.files as Express.Multer.File[]) || [];
@@ -167,7 +194,10 @@ export async function updateProperty(req: Request, res: Response) {
 
     const videoUrls = normalizeVideoUrls(req.body.videoUrls);
 
-    prop.ref = req.body.ref ?? prop.ref;
+    prop.ref =
+      (typeof req.body.ref === "string" && req.body.ref.trim()) ||
+      prop.ref ||
+      (await generateUniqueRef());
     prop.title = req.body.title ?? prop.title;
     prop.description = req.body.description ?? prop.description;
     prop.price = toNum(req.body.price);
@@ -203,12 +233,15 @@ export async function updateProperty(req: Request, res: Response) {
 export async function deleteProperty(req: Request, res: Response) {
   try {
     const prop: any = await Property.findById(req.params.id);
-    if (!prop) return res.status(404).json({ message: "Propiedad no encontrada" });
+    if (!prop)
+      return res.status(404).json({ message: "Propiedad no encontrada" });
 
     // borrar todas las imágenes en Cloudinary
     for (const img of prop.images || []) {
       try {
-        await cloudinary.uploader.destroy(img.publicId, { resource_type: "image" });
+        await cloudinary.uploader.destroy(img.publicId, {
+          resource_type: "image",
+        });
       } catch (e) {
         console.warn("No se pudo borrar en Cloudinary:", img.publicId, e);
       }

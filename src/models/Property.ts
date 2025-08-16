@@ -10,7 +10,7 @@ const ImageSchema = new Schema(
 
 const PropertySchema = new Schema(
   {
-    ref: String,
+    ref: { type: String, unique: true, sparse: true },
     title: { type: String, required: true },
     description: String,
     price: Number,
