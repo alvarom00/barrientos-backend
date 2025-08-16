@@ -32,7 +32,7 @@ const PropertySchema = new Schema(
     bathrooms: Number,
     condition: String,
     age: String,
-    houseMeasures: [String],
+    houseMeasures: String,
     environmentsList: [String],
     services: [String],
     extras: [String],

@@ -133,7 +133,7 @@ export async function createProperty(req: Request, res: Response) {
       bathrooms: toNum(req.body.bathrooms),
       condition: req.body.condition,
       age: req.body.age,
-      houseMeasures: parseStringArray(req.body.houseMeasures),
+      houseMeasures: toNum(req.body.houseMeasures),
       environmentsList: parseStringArray(req.body.environmentsList),
       services: parseStringArray(req.body.services),
       extras: parseStringArray(req.body.extras),
@@ -212,7 +212,7 @@ export async function updateProperty(req: Request, res: Response) {
     prop.bathrooms = toNum(req.body.bathrooms);
     prop.condition = req.body.condition ?? prop.condition;
     prop.age = req.body.age ?? prop.age;
-    prop.houseMeasures = parseStringArray(req.body.houseMeasures);
+    prop.houseMeasures = toNum(req.body.houseMeasures) ?? prop.houseMeasures;
     prop.environmentsList = parseStringArray(req.body.environmentsList);
     prop.services = parseStringArray(req.body.services);
     prop.extras = parseStringArray(req.body.extras);
