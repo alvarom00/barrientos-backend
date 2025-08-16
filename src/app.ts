@@ -7,43 +7,39 @@ import dotenv from "dotenv";
 dotenv.config();
 const app = express();
 
-/** Whitelist de orígenes */
 const STATIC_ORIGINS = [
   process.env.FRONTEND_ORIGIN,   // ej: https://barrientos-frontend.vercel.app
-  "http://localhost:5173",       // dev local
+  "http://localhost:5173",
 ].filter(Boolean) as string[];
 
-/** (Opcional) permitir previews de Vercel (*.vercel.app) */
 const REGEX_ORIGINS = [/\.vercel\.app$/];
 
 app.set("trust proxy", 1);
 
-/** 👉 CORS PRIMERO */
-app.use(
-  cors({
-    origin(origin, cb) {
-      if (!origin) return cb(null, true); // curl/postman o misma máquina
-      if (STATIC_ORIGINS.includes(origin)) return cb(null, true);
-      if (REGEX_ORIGINS.some((r) => r.test(origin))) return cb(null, true);
-      return cb(new Error("Not allowed by CORS"));
-    },
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-    credentials: true,
-  })
-);
-/** Responder preflight */
-app.options("*", cors());
+// 👉 CORS PRIMERO
+const corsMw = cors({
+  origin(origin, cb) {
+    if (!origin) return cb(null, true); // curl/postman o misma máquina
+    if (STATIC_ORIGINS.includes(origin)) return cb(null, true);
+    if (REGEX_ORIGINS.some((r) => r.test(origin))) return cb(null, true);
+    return cb(new Error("Not allowed by CORS"));
+  },
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  credentials: true,
+});
 
-/** Luego seguridad y el resto */
+app.use(corsMw);
+// 🟢 Express 5: NO usar "*". Usar "/(.*)".
+app.options("/(.*)", corsMw);
+
 app.use(helmet());
 app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 app.use(express.json({ limit: "2mb" }));
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
-// Rutas
-// OJO: como montás en /api/..., adentro de los routers usá rutas relativas ("/", "/:id", etc.)
+// Rutas montadas en /api/...
 import propertyRoutes from "./routes/property.routes";
 import authRoutes from "./routes/auth";
 import publicarRoutes from "./routes/publicar";

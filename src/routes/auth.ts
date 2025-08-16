@@ -7,6 +7,7 @@ import { sendEmail } from "../utils/sendEmail";
 import crypto from "crypto";
 
 const router = Router();
+const frontend = process.env.FRONTEND_ORIGIN || "http://localhost:5173";
 
 // REGISTRO (usar solo para crear el admin una vez, luego borrar o proteger)
 router.post("/register", async (req: Request, res: Response) => {
@@ -67,7 +68,7 @@ router.post("/forgot-password", async (req, res) => {
   user.resetPasswordExpires = Date.now() + 1000 * 60 * 60;
   await user.save();
 
-  const resetUrl = `http://localhost:5173/reset-password?token=${token}`;
+  const resetUrl = `${frontend}/reset-password?token=${token}`;
   await sendEmail({
     to: user.email,
     subject: "Recuperar contraseña",
