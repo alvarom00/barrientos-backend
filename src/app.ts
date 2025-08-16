@@ -13,7 +13,7 @@ dotenv.config();
 const app = express();
 
 const STATIC_ORIGINS = [
-  process.env.FRONTEND_ORIGIN, // p.ej. https://barrientos-frontend.vercel.app
+  process.env.FRONTEND_ORIGIN,
   "http://localhost:5173",
 ].filter(Boolean) as string[];
 
@@ -21,7 +21,7 @@ const REGEX_ORIGINS = [/\.vercel\.app$/];
 
 app.set("trust proxy", 1);
 
-// --- CORS (primero y SIN cortar nosotros el OPTIONS) ---
+// CORS primero
 const corsMw = cors({
   origin(origin, cb) {
     if (!origin) return cb(null, true);
@@ -31,37 +31,22 @@ const corsMw = cors({
   },
   credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  // Opción A (recomendado): reflejar lo que pide el browser (no setear allowedHeaders)
-  // allowedHeaders: undefined,
-
-  // Opción B (explícito): lista blanca incluyendo el idempotency key
+  // permite tu header custom
   allowedHeaders: ["Content-Type", "Authorization", "x-idempotency-key"],
 });
 app.use(corsMw);
-// Si querés manejar OPTIONS explícito, hacelo así para que cors ponga todos los headers:
-app.options("*", corsMw);
 
-// --- Middlewares restantes ---
+// ❌ NO hagas app.options("*", …)
+// Si querés algo explícito, usá un path válido, ej:
+// app.options("/api/*", corsMw);
+
 app.use(helmet());
 app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 app.use(express.json({ limit: "2mb" }));
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
-app.get("/health-email", async (_req, res) => {
-  try {
-    await sendEmail({
-      to: process.env.ADMIN_EMAIL!,
-      subject: "Prueba SendGrid ✅",
-      html: "<p>Hola! Esto es un test de SendGrid desde Render.</p>",
-    });
-    res.json({ ok: true });
-  } catch {
-    res.status(500).json({ ok: false, error: "Ver logs de servidor" });
-  }
-});
-
-// --- Rutas ---
+// rutas
 app.use("/api/properties", propertyRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/publicar", publicarRoutes);
