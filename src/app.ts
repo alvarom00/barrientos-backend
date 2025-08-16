@@ -3,7 +3,7 @@ import cors from "cors";
 import morgan from "morgan";
 import helmet from "helmet";
 import dotenv from "dotenv";
-
+import { sendEmail } from "./utils/sendEmail";
 import propertyRoutes from "./routes/property.routes";
 import authRoutes from "./routes/auth";
 import publicarRoutes from "./routes/publicar";
@@ -52,6 +52,19 @@ app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 app.use(express.json({ limit: "2mb" }));
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
+
+app.get("/health-email", async (_req, res) => {
+  try {
+    await sendEmail({
+      to: process.env.ADMIN_EMAIL!,          // tu casilla de prueba
+      subject: "Prueba SendGrid ✅",
+      html: "<p>Hola! Esto es un test de SendGrid desde Render.</p>",
+    });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: "Ver logs de servidor" });
+  }
+});
 
 // 4) Rutas (paths relativos dentro de cada router)
 app.use("/api/properties", propertyRoutes);
