@@ -30,18 +30,6 @@ const forgotLimiter = rateLimit({
   message: { message: "Demasiados intentos, probá más tarde." },
 });
 
-router.post("/register", async (req: Request, res: Response) => {
-  const { email, password } = req.body;
-  if (!email || !password)
-    return res.status(400).json({ message: "Faltan datos" });
-  const existing = await User.findOne({ email });
-  if (existing) return res.status(400).json({ message: "Usuario ya existe" });
-  const passwordHash = await bcrypt.hash(password, 10);
-  const user = new User({ email, passwordHash });
-  await user.save();
-  res.json({ message: "Usuario creado correctamente" });
-});
-
 // LOGIN
 router.post("/login", loginLimiter, async (req: Request, res: Response) => {
   const { email, password } = req.body ?? {};
