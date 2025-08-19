@@ -51,7 +51,7 @@ const corsMw = cors({
 
 app.use(corsMw);
 // Si quieres responder explícitamente solo los preflight de tu API:
-app.options("(.*)", corsMw);
+app.options(/^\/api\/.*$/, corsMw);
 
 app.use(helmet());
 app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
