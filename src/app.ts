@@ -44,7 +44,7 @@ const corsMw = cors({
 
 app.use(corsMw);
 // Responder TODOS los preflights (estrella, NO "(.*)")
-app.options("*", corsMw);
+app.options(/^\/api\/.*$/, corsMw);
 
 // --- Middlewares base ---
 app.use(helmet());
