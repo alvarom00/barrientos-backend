@@ -1,46 +1,45 @@
-// src/utils/sendEmail.ts
-import sgMail from "@sendgrid/mail";
+import sgMail, { MailDataRequired } from "@sendgrid/mail";
 
-const KEY = process.env.SENDGRID_API_KEY;
-const FROM = process.env.MAIL_FROM;
+const API_KEY     = process.env.SENDGRID_API_KEY;
+const FROM_EMAIL  = process.env.MAIL_FROM || "no-reply@camposbarrientos.com";
+const FROM_NAME   = process.env.MAIL_FROM_NAME || "Campos Barrientos";
 
-if (!KEY) {
-  console.error("❌ FALTA SENDGRID_API_KEY en el entorno");
+if (!API_KEY) {
+  console.error("❌ Falta SENDGRID_API_KEY en las variables de entorno");
+} else {
+  sgMail.setApiKey(API_KEY);
 }
-if (!FROM) {
-  console.error("❌ FALTA MAIL_FROM en el entorno");
-}
 
-sgMail.setApiKey(KEY || "");
-
-type SendParams = {
-  to: string;
+export type SendParams = {
+  to: string | string[];   // admite uno o varios destinatarios
   subject: string;
   html: string;
-  replyTo?: string;
+  text?: string;           // opcional: versión texto plano
+  replyTo?: string;        // opcional: para poder responder al remitente real
+  sandbox?: boolean;       // opcional: modo sandbox para pruebas (no envía)
 };
 
-export async function sendEmail({ to, subject, html, replyTo }: SendParams) {
-  const msg: any = {
+export async function sendEmail({ to, subject, html, text, replyTo, sandbox }: SendParams) {
+  if (!API_KEY) throw new Error("SENDGRID_API_KEY no configurada");
+
+  const msg: MailDataRequired = {
     to,
-    from: FROM!,
+    from: { email: FROM_EMAIL, name: FROM_NAME },
     subject,
     html,
+    ...(text ? { text } : {}),
+    ...(replyTo ? { replyTo } : {}),
+    ...(sandbox ? { mailSettings: { sandboxMode: { enable: true } } } : {}),
   };
-  if (replyTo) msg.replyTo = replyTo;
 
   try {
     const [resp] = await sgMail.send(msg);
-    console.log("📨 SendGrid OK", resp.statusCode, resp.headers["x-message-id"] || resp.headers["x-sg-id"]);
-    return { ok: true };
+    const id = resp.headers["x-message-id"] || resp.headers["x-sg-id"];
+    console.log("📨 SendGrid OK", resp.statusCode, id);
+    return { ok: true, status: resp.statusCode, id };
   } catch (err: any) {
-    // SendGrid devuelve info útil en err.response.body
     const body = err?.response?.body;
-    if (body) {
-      console.error("❌ SendGrid error body:", JSON.stringify(body));
-    } else {
-      console.error("❌ SendGrid error:", err?.message || err);
-    }
+    console.error("❌ SendGrid error:", body ? JSON.stringify(body) : err?.message || err);
     throw err;
   }
 }
