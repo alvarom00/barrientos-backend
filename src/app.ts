@@ -40,13 +40,18 @@ const corsMw = cors({
   credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   // Importante: incluir tu header custom para que el preflight lo permita
-  allowedHeaders: ["Content-Type", "Authorization", "X-Idempotency-Key"],
+  allowedHeaders: [
+    "Content-Type",
+    "Authorization",
+    "X-Idempotency-Key",
+    "x-idempotency-key",
+  ],
   optionsSuccessStatus: 204,
 });
 
 app.use(corsMw);
 // Si quieres responder explícitamente solo los preflight de tu API:
-// app.options("/api/*", corsMw);
+app.options("*", corsMw);
 
 app.use(helmet());
 app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
