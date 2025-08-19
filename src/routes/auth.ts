@@ -10,7 +10,9 @@ import rateLimit from "express-rate-limit";
 const router = Router();
 
 // ✅ SIEMPRE desde env; no derives desde el request
-const FRONTEND_BASE = (process.env.FRONTEND_ORIGIN || "http://localhost:5173").replace(/\/$/, "");
+const FRONTEND_BASE = (
+  process.env.FRONTEND_ORIGIN || "http://localhost:5173"
+).replace(/\/$/, "");
 
 // --- Rate limits básicos
 const loginLimiter = rateLimit({
@@ -28,52 +30,79 @@ const forgotLimiter = rateLimit({
   message: { message: "Demasiados intentos, probá más tarde." },
 });
 
+router.post("/register", async (req: Request, res: Response) => {
+  const { email, password } = req.body;
+  if (!email || !password)
+    return res.status(400).json({ message: "Faltan datos" });
+  const existing = await User.findOne({ email });
+  if (existing) return res.status(400).json({ message: "Usuario ya existe" });
+  const passwordHash = await bcrypt.hash(password, 10);
+  const user = new User({ email, passwordHash });
+  await user.save();
+  res.json({ message: "Usuario creado correctamente" });
+});
+
 // LOGIN
 router.post("/login", loginLimiter, async (req: Request, res: Response) => {
   const { email, password } = req.body ?? {};
-  if (!email || !password) return res.status(400).json({ message: "Faltan datos" });
+  if (!email || !password)
+    return res.status(400).json({ message: "Faltan datos" });
 
   const user = await User.findOne({ email });
   if (!user || !(await user.comparePassword(password))) {
     return res.status(401).json({ message: "Email o contraseña incorrectos" });
   }
 
-  const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET!, { expiresIn: "7d" });
+  const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET!, {
+    expiresIn: "7d",
+  });
   res.json({ token });
 });
 
 // CAMBIAR CONTRASEÑA (logueado)
-router.post("/change-password", requireAuth, async (req: any, res: Response) => {
-  const { currentPassword, newPassword } = req.body ?? {};
-  if (!currentPassword || !newPassword || String(newPassword).length < 8) {
-    return res.status(400).json({ message: "Datos inválidos" });
+router.post(
+  "/change-password",
+  requireAuth,
+  async (req: any, res: Response) => {
+    const { currentPassword, newPassword } = req.body ?? {};
+    if (!currentPassword || !newPassword || String(newPassword).length < 8) {
+      return res.status(400).json({ message: "Datos inválidos" });
+    }
+
+    const user = await User.findById(req.user.userId);
+    if (!user)
+      return res.status(404).json({ message: "Usuario no encontrado" });
+
+    const valid = await user.comparePassword(currentPassword);
+    if (!valid)
+      return res.status(401).json({ message: "Contraseña actual incorrecta" });
+
+    user.passwordHash = await bcrypt.hash(newPassword, 12); // un poco más fuerte
+    // opcional: invalida JWTs antiguos
+    (user as any).passwordChangedAt = new Date();
+    await user.save();
+
+    res.json({ message: "Contraseña cambiada correctamente" });
   }
-
-  const user = await User.findById(req.user.userId);
-  if (!user) return res.status(404).json({ message: "Usuario no encontrado" });
-
-  const valid = await user.comparePassword(currentPassword);
-  if (!valid) return res.status(401).json({ message: "Contraseña actual incorrecta" });
-
-  user.passwordHash = await bcrypt.hash(newPassword, 12); // un poco más fuerte
-  // opcional: invalida JWTs antiguos
-  (user as any).passwordChangedAt = new Date();
-  await user.save();
-
-  res.json({ message: "Contraseña cambiada correctamente" });
-});
+);
 
 // OLVIDÉ MI CONTRASEÑA (rate limited)
 router.post("/forgot-password", forgotLimiter, async (req, res) => {
   const { email } = req.body ?? {};
   if (!email) {
-    return res.json({ message: "Si el mail existe, se envió un enlace para recuperar la contraseña." });
+    return res.json({
+      message:
+        "Si el mail existe, se envió un enlace para recuperar la contraseña.",
+    });
   }
 
   const user = await User.findOne({ email });
   // Nunca reveles si existe o no
   if (!user) {
-    return res.json({ message: "Si el mail existe, se envió un enlace para recuperar la contraseña." });
+    return res.json({
+      message:
+        "Si el mail existe, se envió un enlace para recuperar la contraseña.",
+    });
   }
 
   // token crudo para el mail + hash para DB
@@ -97,7 +126,10 @@ router.post("/forgot-password", forgotLimiter, async (req, res) => {
     `,
   });
 
-  res.json({ message: "Si el mail existe, se envió un enlace para recuperar la contraseña." });
+  res.json({
+    message:
+      "Si el mail existe, se envió un enlace para recuperar la contraseña.",
+  });
 });
 
 // RESET PASSWORD (usa el hash)
