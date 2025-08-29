@@ -1,4 +1,3 @@
-// src/routes/property.routes.ts
 import { Router } from "express";
 import {
   getProperties,
@@ -8,7 +7,6 @@ import {
   deleteProperty,
 } from "../controllers/property.controller";
 import { uploadImages } from "../services/fileStorage";
-// import { isAuth } from "../middleware/auth"; // si querés proteger
 
 const router = Router();
 
