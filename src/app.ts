@@ -1,9 +1,9 @@
-// app.ts
 import express from "express";
 import cors from "cors";
 import morgan from "morgan";
 import helmet from "helmet";
 import dotenv from "dotenv";
+import seoRoutes from "./routes/seo";
 
 import propertyRoutes from "./routes/property.routes";
 import authRoutes from "./routes/auth";
@@ -52,6 +52,8 @@ app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 app.use(express.json({ limit: "2mb" }));
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
+
+app.use("/", seoRoutes);
 
 // --- Rutas con prefijo /api ---
 app.use("/api/properties", propertyRoutes);
