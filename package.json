@@ -9,7 +9,8 @@
   "scripts": {
     "dev": "nodemon",
     "build": "tsc -p .",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "slugs:backfill": "ts-node -r dotenv/config --transpile-only scripts/backfill-slugs.ts"
   },
   "dependencies": {
     "@sendgrid/mail": "^8.1.5",

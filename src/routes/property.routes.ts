@@ -1,7 +1,7 @@
 import { Router } from "express";
 import {
   getProperties,
-  getPropertyById,
+  getPropertyByIdOrSlug,
   createProperty,
   updateProperty,
   deleteProperty,
@@ -11,7 +11,9 @@ import { uploadImages } from "../services/fileStorage";
 const router = Router();
 
 router.get("/", getProperties);
-router.get("/:id", getPropertyById);
+// 👇 acepta id o slug (compat con URLs viejas)
+router.get("/:idOrSlug", getPropertyByIdOrSlug);
+
 router.post("/", uploadImages.array("images", 15), createProperty);
 router.put("/:id", uploadImages.array("images", 15), updateProperty);
 router.delete("/:id", deleteProperty);

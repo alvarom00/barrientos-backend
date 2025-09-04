@@ -1,9 +1,11 @@
 import type { Request, Response } from "express";
+import mongoose from "mongoose";
 import Property from "../models/Property";
 import { uploadImageBufferToCloudinary } from "../services/fileStorage";
 import { normalizeVideoUrls } from "../utils/videoUrls";
 import { v2 as cloudinary } from "cloudinary";
 import { customAlphabet } from "nanoid";
+import { makeUniqueSlug } from "../utils/slug";
 
 const nano = customAlphabet("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", 6);
 
@@ -37,11 +39,15 @@ function parseStringArray(val: unknown): string[] {
 }
 
 /** GET /properties */
+/** GET /properties */
 export async function getProperties(req: Request, res: Response) {
   try {
-    const page = Math.max(parseInt(String(req.query.page || 1), 10), 1);
+    const page = Math.max(parseInt(String(req.query.page ?? 1), 10), 1);
+
+    // 👇 acepta pageSize o limit (compatibilidad hacia atrás)
+    const pageSizeRaw = req.query.pageSize ?? req.query.limit ?? 10;
     const pageSize = Math.min(
-      Math.max(parseInt(String(req.query.pageSize || 10), 10), 1),
+      Math.max(parseInt(String(pageSizeRaw), 10) || 10, 1),
       50
     );
 
@@ -69,32 +75,39 @@ export async function getProperties(req: Request, res: Response) {
       Property.countDocuments(filters),
     ]);
 
-    // devolvemos imageUrls virtual + todo lo demás
     const properties = items.map((p: any) => ({
       ...p,
       imageUrls: (p.images || []).map((i: any) => i.url),
     }));
 
-    res.json({ properties, total });
+    res.json({ properties, total, page, pageSize });
   } catch (err) {
     console.error("getProperties error:", err);
     res.status(500).json({ message: "Error obteniendo propiedades" });
   }
 }
 
-/** GET /properties/:id */
-export async function getPropertyById(req: Request, res: Response) {
+/** GET /properties/:idOrSlug */
+export async function getPropertyByIdOrSlug(req: Request, res: Response) {
   try {
-    const prop: any = await Property.findById(req.params.id).lean({
-      virtuals: true,
-    });
+    const { idOrSlug } = req.params;
+
+    let prop: any = null;
+    if (mongoose.isValidObjectId(idOrSlug)) {
+      prop = await Property.findById(idOrSlug).lean({ virtuals: true });
+    }
+    if (!prop) {
+      prop = await Property.findOne({ slug: idOrSlug }).lean({
+        virtuals: true,
+      });
+    }
     if (!prop)
       return res.status(404).json({ message: "Propiedad no encontrada" });
 
     prop.imageUrls = (prop.images || []).map((i: any) => i.url);
     res.json(prop);
   } catch (err) {
-    console.error("getPropertyById error:", err);
+    console.error("getPropertyByIdOrSlug error:", err);
     res.status(500).json({ message: "Error obteniendo la propiedad" });
   }
 }
@@ -117,8 +130,13 @@ export async function createProperty(req: Request, res: Response) {
 
     const videoUrls = normalizeVideoUrls(req.body.videoUrls);
 
+    // 👇 slug único basado en el título (o en el ref si no hay título)
+    const titleForSlug = (req.body.title || finalRef) as string;
+    const slug = await makeUniqueSlug(Property as any, titleForSlug);
+
     const doc = await Property.create({
       ref: finalRef,
+      slug, // 👈
       title: req.body.title,
       description: req.body.description,
       price: toNum(req.body.price),
@@ -135,8 +153,8 @@ export async function createProperty(req: Request, res: Response) {
       houseMeasures: toNum(req.body.houseMeasures),
       services: parseStringArray(req.body.services),
       extras: parseStringArray(req.body.extras),
-      images, // 👈 guardamos objetos con publicId
-      videoUrls, // 👈 solo URLs
+      images,
+      videoUrls,
     });
 
     const json: any = doc.toJSON({ virtuals: true });
@@ -192,11 +210,14 @@ export async function updateProperty(req: Request, res: Response) {
 
     const videoUrls = normalizeVideoUrls(req.body.videoUrls);
 
+    // campos
+    const nextTitle = req.body.title ?? prop.title;
+
     prop.ref =
       (typeof req.body.ref === "string" && req.body.ref.trim()) ||
       prop.ref ||
       (await generateUniqueRef());
-    prop.title = req.body.title ?? prop.title;
+    prop.title = nextTitle;
     prop.description = req.body.description ?? prop.description;
     prop.price = toNum(req.body.price);
     prop.measure = toNum(req.body.measure) ?? prop.measure;
@@ -214,6 +235,16 @@ export async function updateProperty(req: Request, res: Response) {
     prop.extras = parseStringArray(req.body.extras);
     prop.images = newImages;
     prop.videoUrls = videoUrls;
+
+    // 👇 si cambió el título, regeneramos un slug único
+    if (req.body.title && req.body.title !== prop.title) {
+      prop.slug = await makeUniqueSlug(
+        Property as any,
+        req.body.title,
+        prop._id
+      );
+    }
+
     await prop.save();
 
     const json: any = prop.toJSON({ virtuals: true });

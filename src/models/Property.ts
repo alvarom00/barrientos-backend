@@ -1,4 +1,5 @@
 import { Schema, model } from "mongoose";
+import { makeUniqueSlug } from "../utils/slug";
 
 const ImageSchema = new Schema(
   {
@@ -34,6 +35,7 @@ const PropertySchema = new Schema(
     houseMeasures: String,
     services: [String],
     extras: [String],
+    slug: { type: String, index: true, unique: true, sparse: true },
   },
   { timestamps: true }
 );
@@ -41,6 +43,29 @@ const PropertySchema = new Schema(
 // Virtual para que el front reciba imageUrls: string[]
 PropertySchema.virtual("imageUrls").get(function () {
   return (this.images || []).map((i: any) => i.url);
+});
+
+// Hook pre-save (cuando cambia el título)
+PropertySchema.pre("save", async function (next) {
+  if (this.isModified("title")) {
+    // @ts-ignore
+    this.slug = await makeUniqueSlug(this.constructor, this.title, this._id);
+  }
+  next();
+});
+
+// Hook para findOneAndUpdate (cuando actualizas por PUT)
+PropertySchema.pre("findOneAndUpdate", async function (next) {
+  const update: any = this.getUpdate() || {};
+  if (update.title) {
+    const Model: any = this.model; // el propio modelo
+    const doc = await Model.findOne(this.getQuery()).select("_id");
+    if (doc) {
+      update.slug = await makeUniqueSlug(Model, update.title, doc._id);
+      this.setUpdate(update);
+    }
+  }
+  next();
 });
 
 PropertySchema.set("toJSON", { virtuals: true });

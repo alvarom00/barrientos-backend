@@ -18,7 +18,10 @@ type LeanPropIdDates = {
 };
 
 function baseUrl() {
-  return (process.env.FRONTEND_ORIGIN || "http://localhost:5173").replace(/\/$/, "");
+  return (process.env.FRONTEND_ORIGIN || "http://localhost:5173").replace(
+    /\/$/,
+    ""
+  );
 }
 
 function fmtDate(d: Date | string | number) {
@@ -61,17 +64,22 @@ router.get("/sitemap.xml", async (_req: Request, res: Response) => {
   ];
 
   // ⬇️ Tipamos el resultado de lean()
-  const props = await Property.find({})
-    .select("_id updatedAt createdAt")
+  const props = (await Property.find({})
+    .select("_id slug updatedAt createdAt")
     .sort({ updatedAt: -1 })
-    .lean<LeanPropIdDates[]>();
+    .lean()) as Array<{
+    _id: any;
+    slug?: string;
+    updatedAt?: Date;
+    createdAt?: Date;
+  }>;
 
-  // ⬇️ p queda tipado, no 'any'
-  const propUrls: SitemapUrl[] = props.map((p: LeanPropIdDates) => {
-    const id = typeof p._id === "string" ? p._id : p._id.toString();
-    const last = p.updatedAt ?? p.createdAt;
+  const propUrls = props.map((p) => {
+    const last = p.updatedAt || p.createdAt;
+    const id = typeof p._id === "object" ? String(p._id) : (p._id as string);
+    const slug = p.slug ? `/${p.slug}` : "";
     return {
-      loc: `${site}/properties/${id}`,
+      loc: `${site}/properties/${id}${slug}`,
       lastmod: last ? fmtDate(last) : undefined,
       changefreq: "weekly",
       priority: "0.7",
