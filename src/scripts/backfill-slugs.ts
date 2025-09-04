@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
-import Property from "../src/models/Property";
-import { makeUniqueSlug } from "../src/utils/slug";
+import Property from "../models/Property";
+import { makeUniqueSlug } from "../utils/slug";
 
 (async () => {
   await mongoose.connect(process.env.MONGODB_URI!);
