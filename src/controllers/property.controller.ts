@@ -1,3 +1,4 @@
+// controllers/property.controller.ts
 import type { Request, Response } from "express";
 import mongoose from "mongoose";
 import Property from "../models/Property";
@@ -6,8 +7,21 @@ import { normalizeVideoUrls } from "../utils/videoUrls";
 import { v2 as cloudinary } from "cloudinary";
 import { customAlphabet } from "nanoid";
 import { makeUniqueSlug } from "../utils/slug";
+import { notifySearchEngines } from "../utils/searchPing";
 
 const nano = customAlphabet("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", 6);
+
+function siteBase() {
+  return (process.env.FRONTEND_ORIGIN || "http://localhost:5173").replace(/\/$/, "");
+}
+
+function propertyUrl(id: string, slug?: string | null) {
+  const s = slug ?? undefined;
+  return s
+    ? `${siteBase()}/properties/${id}/${s}`
+    : `${siteBase()}/properties/${id}`;
+}
+
 
 async function generateUniqueRef() {
   let ref = "";
@@ -30,26 +44,18 @@ function parseStringArray(val: unknown): string[] {
       const parsed = JSON.parse(val);
       if (Array.isArray(parsed)) return parsed.map(String);
     } catch {}
-    return val
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
+    return val.split(",").map((s) => s.trim()).filter(Boolean);
   }
   return [];
 }
 
 /** GET /properties */
-/** GET /properties */
 export async function getProperties(req: Request, res: Response) {
   try {
     const page = Math.max(parseInt(String(req.query.page ?? 1), 10), 1);
-
-    // 👇 acepta pageSize o limit (compatibilidad hacia atrás)
+    // acepta pageSize o limit (compatibilidad hacia atrás)
     const pageSizeRaw = req.query.pageSize ?? req.query.limit ?? 10;
-    const pageSize = Math.min(
-      Math.max(parseInt(String(pageSizeRaw), 10) || 10, 1),
-      50
-    );
+    const pageSize = Math.min(Math.max(parseInt(String(pageSizeRaw), 10) || 10, 1), 50);
 
     const search = String(req.query.search || "").trim();
     const operationType = String(req.query.operationType || "").trim();
@@ -58,12 +64,7 @@ export async function getProperties(req: Request, res: Response) {
     if (operationType) filters.operationType = operationType;
     if (search) {
       const rx = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
-      filters.$or = [
-        { ref: rx },
-        { title: rx },
-        { location: rx },
-        { description: rx },
-      ];
+      filters.$or = [{ ref: rx }, { title: rx }, { location: rx }, { description: rx }];
     }
 
     const [items, total] = await Promise.all([
@@ -78,6 +79,7 @@ export async function getProperties(req: Request, res: Response) {
     const properties = items.map((p: any) => ({
       ...p,
       imageUrls: (p.images || []).map((i: any) => i.url),
+      slug: p.slug, // 👈 por claridad
     }));
 
     res.json({ properties, total, page, pageSize });
@@ -97,12 +99,9 @@ export async function getPropertyByIdOrSlug(req: Request, res: Response) {
       prop = await Property.findById(idOrSlug).lean({ virtuals: true });
     }
     if (!prop) {
-      prop = await Property.findOne({ slug: idOrSlug }).lean({
-        virtuals: true,
-      });
+      prop = await Property.findOne({ slug: idOrSlug }).lean({ virtuals: true });
     }
-    if (!prop)
-      return res.status(404).json({ message: "Propiedad no encontrada" });
+    if (!prop) return res.status(404).json({ message: "Propiedad no encontrada" });
 
     prop.imageUrls = (prop.images || []).map((i: any) => i.url);
     res.json(prop);
@@ -121,22 +120,19 @@ export async function createProperty(req: Request, res: Response) {
     const finalRef = ref && ref.length > 0 ? ref : await generateUniqueRef();
 
     for (const f of files) {
-      const { secure_url, public_id } = await uploadImageBufferToCloudinary(
-        f.buffer,
-        f.originalname
-      );
+      const { secure_url, public_id } = await uploadImageBufferToCloudinary(f.buffer, f.originalname);
       images.push({ url: secure_url, publicId: public_id });
     }
 
     const videoUrls = normalizeVideoUrls(req.body.videoUrls);
 
-    // 👇 slug único basado en el título (o en el ref si no hay título)
+    // slug único basado en el título (o en el ref si no hay título)
     const titleForSlug = (req.body.title || finalRef) as string;
     const slug = await makeUniqueSlug(Property as any, titleForSlug);
 
     const doc = await Property.create({
       ref: finalRef,
-      slug, // 👈
+      slug,
       title: req.body.title,
       description: req.body.description,
       price: toNum(req.body.price),
@@ -159,6 +155,11 @@ export async function createProperty(req: Request, res: Response) {
 
     const json: any = doc.toJSON({ virtuals: true });
     json.imageUrls = images.map((i) => i.url);
+
+    // 🔔 Ping no bloqueante
+    const url = propertyUrl(String(doc._id), doc.slug);
+    notifySearchEngines([url]).catch((e) => console.warn("IndexNow create ping error:", e?.message || e));
+
     res.status(201).json(json);
   } catch (err) {
     console.error("createProperty error:", err);
@@ -171,53 +172,42 @@ export async function updateProperty(req: Request, res: Response) {
   try {
     const id = req.params.id;
     const prop: any = await Property.findById(id);
-    if (!prop)
-      return res.status(404).json({ message: "Propiedad no encontrada" });
+    if (!prop) return res.status(404).json({ message: "Propiedad no encontrada" });
 
-    // URLs que el front quiere mantener (vienen como keepImages)
     const keepImages = parseStringArray(req.body.keepImages);
 
-    // determinar cuáles borrar en Cloudinary (las que existen pero no están en keep)
-    const toDelete = (prop.images || []).filter(
-      (img: any) => !keepImages.includes(img.url)
-    );
-
-    // borrar en Cloudinary
+    const toDelete = (prop.images || []).filter((img: any) => !keepImages.includes(img.url));
     for (const img of toDelete) {
       try {
-        await cloudinary.uploader.destroy(img.publicId, {
-          resource_type: "image",
-        });
+        await cloudinary.uploader.destroy(img.publicId, { resource_type: "image" });
       } catch (e) {
         console.warn("No se pudo borrar en Cloudinary:", img.publicId, e);
       }
     }
 
-    // mantener las que quedan
-    let newImages: { url: string; publicId: string }[] = (
-      prop.images || []
-    ).filter((img: any) => keepImages.includes(img.url));
+    let newImages: { url: string; publicId: string }[] =
+      (prop.images || []).filter((img: any) => keepImages.includes(img.url));
 
-    // agregar nuevas subidas
     const newFiles = (req.files as Express.Multer.File[]) || [];
     for (const f of newFiles) {
-      const { secure_url, public_id } = await uploadImageBufferToCloudinary(
-        f.buffer,
-        f.originalname
-      );
+      const { secure_url, public_id } = await uploadImageBufferToCloudinary(f.buffer, f.originalname);
       newImages.push({ url: secure_url, publicId: public_id });
     }
 
     const videoUrls = normalizeVideoUrls(req.body.videoUrls);
 
-    // campos
-    const nextTitle = req.body.title ?? prop.title;
+    // --- detectar cambio de título ANTES de asignar ---
+    const incomingTitle = typeof req.body.title === "string" ? req.body.title : undefined;
+    const titleChanged = incomingTitle && incomingTitle.trim() && incomingTitle.trim() !== prop.title;
+    const oldSlug = prop.slug; // por si cambia el slug
 
+    // campos
     prop.ref =
       (typeof req.body.ref === "string" && req.body.ref.trim()) ||
       prop.ref ||
       (await generateUniqueRef());
-    prop.title = nextTitle;
+
+    prop.title = incomingTitle ?? prop.title;
     prop.description = req.body.description ?? prop.description;
     prop.price = toNum(req.body.price);
     prop.measure = toNum(req.body.measure) ?? prop.measure;
@@ -236,19 +226,24 @@ export async function updateProperty(req: Request, res: Response) {
     prop.images = newImages;
     prop.videoUrls = videoUrls;
 
-    // 👇 si cambió el título, regeneramos un slug único
-    if (req.body.title && req.body.title !== prop.title) {
-      prop.slug = await makeUniqueSlug(
-        Property as any,
-        req.body.title,
-        prop._id
-      );
+    if (titleChanged) {
+      prop.slug = await makeUniqueSlug(Property as any, incomingTitle!, prop._id);
     }
 
     await prop.save();
 
     const json: any = prop.toJSON({ virtuals: true });
     json.imageUrls = (prop.images || []).map((i: any) => i.url);
+
+    // 🔔 Ping no bloqueante (nueva URL y eventualmente la vieja si cambió el slug)
+    const urlsToPing = [propertyUrl(String(prop._id), prop.slug)];
+    if (titleChanged && oldSlug && oldSlug !== prop.slug) {
+      urlsToPing.push(propertyUrl(String(prop._id), oldSlug)); // para que la recrawleen y vean 404/301
+    }
+    notifySearchEngines(urlsToPing).catch((e) =>
+      console.warn("IndexNow update ping error:", e?.message || e)
+    );
+
     res.json(json);
   } catch (err) {
     console.error("updateProperty error:", err);
@@ -260,21 +255,26 @@ export async function updateProperty(req: Request, res: Response) {
 export async function deleteProperty(req: Request, res: Response) {
   try {
     const prop: any = await Property.findById(req.params.id);
-    if (!prop)
-      return res.status(404).json({ message: "Propiedad no encontrada" });
+    if (!prop) return res.status(404).json({ message: "Propiedad no encontrada" });
 
-    // borrar todas las imágenes en Cloudinary
+    // guardamos URL canónica antes de borrar
+    const urlToPing = propertyUrl(String(prop._id), prop.slug);
+
     for (const img of prop.images || []) {
       try {
-        await cloudinary.uploader.destroy(img.publicId, {
-          resource_type: "image",
-        });
+        await cloudinary.uploader.destroy(img.publicId, { resource_type: "image" });
       } catch (e) {
         console.warn("No se pudo borrar en Cloudinary:", img.publicId, e);
       }
     }
 
     await prop.deleteOne();
+
+    // 🔔 Ping para que la vuelvan a rastrear (verán 404 y la quitarán)
+    notifySearchEngines([urlToPing]).catch((e) =>
+      console.warn("IndexNow delete ping error:", e?.message || e)
+    );
+
     res.json({ ok: true });
   } catch (err) {
     console.error("deleteProperty error:", err);
