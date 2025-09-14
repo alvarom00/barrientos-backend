@@ -36,8 +36,14 @@ const PropertySchema = new Schema(
     services: [String],
     extras: [String],
     slug: { type: String, index: true, unique: true, sparse: true },
+    keywords: { type: [String], default: [] },
   },
   { timestamps: true }
+);
+
+PropertySchema.index(
+  { title: "text", description: "text", location: "text", keywords: "text" },
+  { weights: { title: 10, keywords: 6, location: 4, description: 1 } }
 );
 
 // Virtual para que el front reciba imageUrls: string[]

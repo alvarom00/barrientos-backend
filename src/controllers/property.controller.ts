@@ -8,11 +8,15 @@ import { v2 as cloudinary } from "cloudinary";
 import { customAlphabet } from "nanoid";
 import { makeUniqueSlug } from "../utils/slug";
 import { notifySearchEngines } from "../utils/searchPing";
+import { generateKeywords } from "../utils/keywords";
 
 const nano = customAlphabet("ABCDEFGHJKLMNPQRSTUVWXYZ23456789", 6);
 
 function siteBase() {
-  return (process.env.FRONTEND_ORIGIN || "http://localhost:5173").replace(/\/$/, "");
+  return (process.env.FRONTEND_ORIGIN || "http://localhost:5173").replace(
+    /\/$/,
+    ""
+  );
 }
 
 function propertyUrl(id: string, slug?: string | null) {
@@ -21,7 +25,6 @@ function propertyUrl(id: string, slug?: string | null) {
     ? `${siteBase()}/properties/${id}/${s}`
     : `${siteBase()}/properties/${id}`;
 }
-
 
 async function generateUniqueRef() {
   let ref = "";
@@ -44,7 +47,10 @@ function parseStringArray(val: unknown): string[] {
       const parsed = JSON.parse(val);
       if (Array.isArray(parsed)) return parsed.map(String);
     } catch {}
-    return val.split(",").map((s) => s.trim()).filter(Boolean);
+    return val
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
   }
   return [];
 }
@@ -55,7 +61,10 @@ export async function getProperties(req: Request, res: Response) {
     const page = Math.max(parseInt(String(req.query.page ?? 1), 10), 1);
     // acepta pageSize o limit (compatibilidad hacia atrás)
     const pageSizeRaw = req.query.pageSize ?? req.query.limit ?? 10;
-    const pageSize = Math.min(Math.max(parseInt(String(pageSizeRaw), 10) || 10, 1), 50);
+    const pageSize = Math.min(
+      Math.max(parseInt(String(pageSizeRaw), 10) || 10, 1),
+      50
+    );
 
     const search = String(req.query.search || "").trim();
     const operationType = String(req.query.operationType || "").trim();
@@ -64,7 +73,12 @@ export async function getProperties(req: Request, res: Response) {
     if (operationType) filters.operationType = operationType;
     if (search) {
       const rx = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
-      filters.$or = [{ ref: rx }, { title: rx }, { location: rx }, { description: rx }];
+      filters.$or = [
+        { ref: rx },
+        { title: rx },
+        { location: rx },
+        { description: rx },
+      ];
     }
 
     const [items, total] = await Promise.all([
@@ -99,9 +113,12 @@ export async function getPropertyByIdOrSlug(req: Request, res: Response) {
       prop = await Property.findById(idOrSlug).lean({ virtuals: true });
     }
     if (!prop) {
-      prop = await Property.findOne({ slug: idOrSlug }).lean({ virtuals: true });
+      prop = await Property.findOne({ slug: idOrSlug }).lean({
+        virtuals: true,
+      });
     }
-    if (!prop) return res.status(404).json({ message: "Propiedad no encontrada" });
+    if (!prop)
+      return res.status(404).json({ message: "Propiedad no encontrada" });
 
     prop.imageUrls = (prop.images || []).map((i: any) => i.url);
     res.json(prop);
@@ -120,7 +137,10 @@ export async function createProperty(req: Request, res: Response) {
     const finalRef = ref && ref.length > 0 ? ref : await generateUniqueRef();
 
     for (const f of files) {
-      const { secure_url, public_id } = await uploadImageBufferToCloudinary(f.buffer, f.originalname);
+      const { secure_url, public_id } = await uploadImageBufferToCloudinary(
+        f.buffer,
+        f.originalname
+      );
       images.push({ url: secure_url, publicId: public_id });
     }
 
@@ -129,6 +149,14 @@ export async function createProperty(req: Request, res: Response) {
     // slug único basado en el título (o en el ref si no hay título)
     const titleForSlug = (req.body.title || finalRef) as string;
     const slug = await makeUniqueSlug(Property as any, titleForSlug);
+
+    const keywords = generateKeywords({
+      title: req.body.title,
+      location: req.body.location,
+      operationType: req.body.operationType,
+      measure: toNum(req.body.measure),
+      propertyType: req.body.propertyType,
+    });
 
     const doc = await Property.create({
       ref: finalRef,
@@ -151,6 +179,7 @@ export async function createProperty(req: Request, res: Response) {
       extras: parseStringArray(req.body.extras),
       images,
       videoUrls,
+      keywords,
     });
 
     const json: any = doc.toJSON({ virtuals: true });
@@ -158,7 +187,9 @@ export async function createProperty(req: Request, res: Response) {
 
     // 🔔 Ping no bloqueante
     const url = propertyUrl(String(doc._id), doc.slug);
-    notifySearchEngines([url]).catch((e) => console.warn("IndexNow create ping error:", e?.message || e));
+    notifySearchEngines([url]).catch((e) =>
+      console.warn("IndexNow create ping error:", e?.message || e)
+    );
 
     res.status(201).json(json);
   } catch (err) {
@@ -172,36 +203,46 @@ export async function updateProperty(req: Request, res: Response) {
   try {
     const id = req.params.id;
     const prop: any = await Property.findById(id);
-    if (!prop) return res.status(404).json({ message: "Propiedad no encontrada" });
+    if (!prop)
+      return res.status(404).json({ message: "Propiedad no encontrada" });
 
+    // --- Mantener / borrar imágenes ---
     const keepImages = parseStringArray(req.body.keepImages);
-
-    const toDelete = (prop.images || []).filter((img: any) => !keepImages.includes(img.url));
+    const toDelete = (prop.images || []).filter(
+      (img: any) => !keepImages.includes(img.url)
+    );
     for (const img of toDelete) {
       try {
-        await cloudinary.uploader.destroy(img.publicId, { resource_type: "image" });
+        await cloudinary.uploader.destroy(img.publicId, {
+          resource_type: "image",
+        });
       } catch (e) {
         console.warn("No se pudo borrar en Cloudinary:", img.publicId, e);
       }
     }
 
-    let newImages: { url: string; publicId: string }[] =
-      (prop.images || []).filter((img: any) => keepImages.includes(img.url));
+    let newImages: { url: string; publicId: string }[] = (
+      prop.images || []
+    ).filter((img: any) => keepImages.includes(img.url));
 
     const newFiles = (req.files as Express.Multer.File[]) || [];
     for (const f of newFiles) {
-      const { secure_url, public_id } = await uploadImageBufferToCloudinary(f.buffer, f.originalname);
+      const { secure_url, public_id } = await uploadImageBufferToCloudinary(
+        f.buffer,
+        f.originalname
+      );
       newImages.push({ url: secure_url, publicId: public_id });
     }
 
     const videoUrls = normalizeVideoUrls(req.body.videoUrls);
 
-    // --- detectar cambio de título ANTES de asignar ---
-    const incomingTitle = typeof req.body.title === "string" ? req.body.title : undefined;
-    const titleChanged = incomingTitle && incomingTitle.trim() && incomingTitle.trim() !== prop.title;
-    const oldSlug = prop.slug; // por si cambia el slug
+    // --- Detectar cambio de título (para slug) ANTES de asignar ---
+    const incomingTitle =
+      typeof req.body.title === "string" ? req.body.title.trim() : undefined;
+    const titleChanged = !!(incomingTitle && incomingTitle !== prop.title);
+    const oldSlug = prop.slug;
 
-    // campos
+    // --- Campos ---
     prop.ref =
       (typeof req.body.ref === "string" && req.body.ref.trim()) ||
       prop.ref ||
@@ -226,8 +267,22 @@ export async function updateProperty(req: Request, res: Response) {
     prop.images = newImages;
     prop.videoUrls = videoUrls;
 
+    // --- Regenerar keywords SIEMPRE (barato y evita inconsistencias) ---
+    prop.keywords = generateKeywords({
+      title: prop.title,
+      location: prop.location,
+      operationType: prop.operationType,
+      measure: prop.measure,
+      propertyType: prop.propertyType,
+    });
+
+    // --- Regenerar slug si cambió el título ---
     if (titleChanged) {
-      prop.slug = await makeUniqueSlug(Property as any, incomingTitle!, prop._id);
+      prop.slug = await makeUniqueSlug(
+        Property as any,
+        incomingTitle!,
+        prop._id
+      );
     }
 
     await prop.save();
@@ -235,13 +290,14 @@ export async function updateProperty(req: Request, res: Response) {
     const json: any = prop.toJSON({ virtuals: true });
     json.imageUrls = (prop.images || []).map((i: any) => i.url);
 
-    // 🔔 Ping no bloqueante (nueva URL y eventualmente la vieja si cambió el slug)
+    // 🔔 Notificar a buscadores (IndexNow/Bing/Google endpoint que uses)
     const urlsToPing = [propertyUrl(String(prop._id), prop.slug)];
     if (titleChanged && oldSlug && oldSlug !== prop.slug) {
-      urlsToPing.push(propertyUrl(String(prop._id), oldSlug)); // para que la recrawleen y vean 404/301
+      // Notificamos también la URL vieja para que la recrawleen (verán 301/404 según tu manejo)
+      urlsToPing.push(propertyUrl(String(prop._id), oldSlug));
     }
     notifySearchEngines(urlsToPing).catch((e) =>
-      console.warn("IndexNow update ping error:", e?.message || e)
+      console.warn("Indexing ping (update) error:", e?.message || e)
     );
 
     res.json(json);
@@ -255,14 +311,17 @@ export async function updateProperty(req: Request, res: Response) {
 export async function deleteProperty(req: Request, res: Response) {
   try {
     const prop: any = await Property.findById(req.params.id);
-    if (!prop) return res.status(404).json({ message: "Propiedad no encontrada" });
+    if (!prop)
+      return res.status(404).json({ message: "Propiedad no encontrada" });
 
     // guardamos URL canónica antes de borrar
     const urlToPing = propertyUrl(String(prop._id), prop.slug);
 
     for (const img of prop.images || []) {
       try {
-        await cloudinary.uploader.destroy(img.publicId, { resource_type: "image" });
+        await cloudinary.uploader.destroy(img.publicId, {
+          resource_type: "image",
+        });
       } catch (e) {
         console.warn("No se pudo borrar en Cloudinary:", img.publicId, e);
       }
