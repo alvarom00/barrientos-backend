@@ -14,8 +14,8 @@ router.get("/", getProperties);
 // 👇 acepta id o slug (compat con URLs viejas)
 router.get("/:idOrSlug", getPropertyByIdOrSlug);
 
-router.post("/", uploadImages.array("images", 15), createProperty);
-router.put("/:id", uploadImages.array("images", 15), updateProperty);
+router.post("/", uploadImages.array("images", 30), createProperty);
+router.put("/:id", uploadImages.array("images", 30), updateProperty);
 router.delete("/:id", deleteProperty);
 
 export default router;

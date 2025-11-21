@@ -1,9 +1,10 @@
-import express from "express";
+import express, { Request, Response, NextFunction } from "express";
 import cors from "cors";
 import morgan from "morgan";
 import helmet from "helmet";
 import dotenv from "dotenv";
 import seoRoutes from "./routes/seo";
+import multer from "multer";
 
 import propertyRoutes from "./routes/property.routes";
 import authRoutes from "./routes/auth";
@@ -17,12 +18,12 @@ app.set("trust proxy", 1);
 
 // --- CORS ---
 const ALLOW = [
-  process.env.FRONTEND_ORIGIN, // https://camposbarrientos.com
-  process.env.FRONTEND_ORIGIN_WWW, // https://www.camposbarrientos.com
+  process.env.FRONTEND_ORIGIN,
+  process.env.FRONTEND_ORIGIN_WWW,
   "http://localhost:5173",
 ]
   .filter(Boolean)
-  .map((o) => o!.replace(/\/$/, "")); // sin slash final
+  .map((o) => o!.replace(/\/$/, ""));
 
 const corsMw = cors({
   origin(origin, cb) {
@@ -43,7 +44,6 @@ const corsMw = cors({
 });
 
 app.use(corsMw);
-// Responder TODOS los preflights (estrella, NO "(.*)")
 app.options(/^\/api\/.*$/, corsMw);
 
 // --- Middlewares base ---
@@ -60,5 +60,35 @@ app.use("/api/properties", propertyRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/publicar", publicarRoutes);
 app.use("/api/contact-property", contactPropertyRoutes);
+
+// --- Error handler global (incluye Multer) ---
+app.use(
+  (
+    err: any,
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ) => {
+    // Errores específicos de Multer
+    if (err instanceof multer.MulterError) {
+      if (err.code === "LIMIT_FILE_COUNT") {
+        return res.status(400).json({
+          message: "Solo podés subir hasta 30 imágenes por propiedad.",
+        });
+      }
+
+      if (err.code === "LIMIT_UNEXPECTED_FILE") {
+        return res.status(400).json({
+          message:
+            "Subiste demasiados archivos o el campo 'images' no es válido.",
+        });
+      }
+    }
+
+    // Otros errores
+    console.error("Middleware error:", err);
+    res.status(500).json({ message: "Error interno del servidor" });
+  }
+);
 
 export default app;
