@@ -12,7 +12,7 @@ export const uploadImages = multer({
   storage: multer.memoryStorage(),
   limits: {
     fileSize: 20 * 1024 * 1024,
-    files: 15,
+    files: 30,
   },
   fileFilter: (_req, file, cb) => {
     const isImage = /^image\/(jpeg|png|webp|gif)$/.test(file.mimetype);
