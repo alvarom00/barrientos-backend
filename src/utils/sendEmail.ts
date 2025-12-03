@@ -1,4 +1,8 @@
-import Brevo from "@getbrevo/brevo";
+import {
+  TransactionalEmailsApi,
+  TransactionalEmailsApiApiKeys,
+  CreateSmtpEmail,
+} from "@getbrevo/brevo";
 
 const apiKey = process.env.BREVO_API_KEY;
 const FROM_EMAIL = process.env.MAIL_FROM || "no-reply@camposbarrientos.com";
@@ -8,8 +12,8 @@ if (!apiKey) {
   throw new Error("❌ Falta BREVO_API_KEY en variables de entorno");
 }
 
-const client = new Brevo.TransactionalEmailsApi();
-client.setApiKey(Brevo.TransactionalEmailsApiApiKeys.apiKey, apiKey);
+const client = new TransactionalEmailsApi();
+client.setApiKey(TransactionalEmailsApiApiKeys.apiKey, apiKey);
 
 export type SendParams = {
   to: string | string[];
@@ -38,9 +42,9 @@ export async function sendEmail({
   };
 
   try {
-    const resp = await client.sendTransacEmail(msg);
+    const resp: { body: CreateSmtpEmail } = await client.sendTransacEmail(msg);
 
-    const messageId = resp?.body?.messageId;
+    const messageId = resp.body?.messageId;
 
     console.log("📨 Brevo OK:", messageId);
 
