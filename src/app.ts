@@ -5,6 +5,7 @@ import helmet from "helmet";
 import dotenv from "dotenv";
 import seoRoutes from "./routes/seo";
 import multer from "multer";
+import aiRoutes from "./routes/ai.routes";
 
 import propertyRoutes from "./routes/property.routes";
 import authRoutes from "./routes/auth";
@@ -60,6 +61,7 @@ app.use("/api/properties", propertyRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/publicar", publicarRoutes);
 app.use("/api/contact-property", contactPropertyRoutes);
+app.use("/api/ai", aiRoutes);
 
 // --- Error handler global (incluye Multer) ---
 app.use(
