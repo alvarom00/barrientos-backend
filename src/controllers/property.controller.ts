@@ -137,11 +137,28 @@ export async function createProperty(req: Request, res: Response) {
     const finalRef = ref && ref.length > 0 ? ref : await generateUniqueRef();
 
     for (const f of files) {
-      const { secure_url, public_id } = await uploadImageBufferToCloudinary(
-        f.buffer,
-        f.originalname,
-      );
-      images.push({ url: secure_url, publicId: public_id });
+      let result;
+
+      if (f.buffer) {
+        // 🧠 memoryStorage
+        result = await uploadImageBufferToCloudinary(f.buffer, f.originalname);
+      } else if (f.path) {
+        // 🧠 diskStorage
+        result = await cloudinary.uploader.upload(f.path);
+      } else {
+        continue;
+      }
+
+      images.push({
+        url: result.secure_url,
+        publicId: result.public_id,
+      });
+    }
+
+    if (images.length === 0) {
+      return res
+        .status(400)
+        .json({ message: "Debe subir al menos una imagen" });
     }
 
     const videoUrls = normalizeVideoUrls(req.body.videoUrls);
@@ -158,12 +175,14 @@ export async function createProperty(req: Request, res: Response) {
       propertyType: req.body.propertyType,
     });
 
+    const isVenta = req.body.operationType === "Venta";
+
     const doc = await Property.create({
       ref: finalRef,
       slug,
       title: req.body.title,
       description: req.body.description,
-      price: toNum(req.body.price),
+      price: isVenta ? toNum(req.body.price) : undefined,
       measure: toNum(req.body.measure)!,
       location: req.body.location,
       lat: toNum(req.body.lat),
@@ -232,16 +251,25 @@ export const updateProperty = async (req: Request, res: Response) => {
         const file = files[fileIndex++];
         if (!file) continue;
 
+        const upload = await cloudinary.uploader.upload(file.path);
+
         finalImages.push({
-          url: file.path,
-          publicId: file.filename,
+          url: upload.secure_url,
+          publicId: upload.public_id,
         });
       }
     }
 
     property.set("images", finalImages);
 
-    Object.assign(property, req.body);
+    const {
+      images: _images,
+      imagesOrder: _imagesOrder,
+      deletedImages: _deletedImages,
+      ...safeBody
+    } = req.body;
+
+    Object.assign(property, safeBody);
 
     await property.save();
 
