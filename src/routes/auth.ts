@@ -71,7 +71,7 @@ router.post(
     await user.save();
 
     res.json({ message: "Contraseña cambiada correctamente" });
-  }
+  },
 );
 
 // OLVIDÉ MI CONTRASEÑA (rate limited)
@@ -103,16 +103,20 @@ router.post("/forgot-password", forgotLimiter, async (req, res) => {
 
   const resetUrl = `${FRONTEND_BASE}/reset-password?token=${rawToken}`;
 
-  await sendEmail({
-    to: user.email,
-    subject: "Recuperar contraseña",
-    html: `
+  try {
+    await sendEmail({
+      to: user.email,
+      subject: "Recuperar contraseña",
+      html: `
       <p>Hola, has solicitado restablecer tu contraseña.</p>
       <p>Haz clic en el siguiente enlace para crear una nueva contraseña:</p>
-      <p><a href="${resetUrl}" target="_blank" rel="noopener noreferrer">${resetUrl}</a></p>
+      <p><a href="${resetUrl}" target="_blank">${resetUrl}</a></p>
       <p>Si no fuiste tú, ignora este correo.</p>
     `,
-  });
+    });
+  } catch (err) {
+    console.error("❌ Error enviando recovery email:", err);
+  }
 
   res.json({
     message:
