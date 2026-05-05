@@ -251,7 +251,18 @@ export const updateProperty = async (req: Request, res: Response) => {
         const file = files[fileIndex++];
         if (!file) continue;
 
-        const upload = await cloudinary.uploader.upload(file.path);
+        let upload;
+
+        if (file.buffer) {
+          upload = await uploadImageBufferToCloudinary(
+            file.buffer,
+            file.originalname,
+          );
+        } else if (file.path) {
+          upload = await cloudinary.uploader.upload(file.path);
+        } else {
+          continue;
+        }
 
         finalImages.push({
           url: upload.secure_url,
