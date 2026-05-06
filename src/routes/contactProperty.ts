@@ -1,9 +1,10 @@
 import { Router, Request, Response } from "express";
 import { sendEmail } from "../utils/sendEmail";
+import { verifyTurnstile } from "../middleware/verifyTurnstile";
 
 const router = Router();
 
-router.post("/", async (req: Request, res: Response) => {
+router.post("/", verifyTurnstile, async (req: Request, res: Response) => {
   const { nombre, email, telefono, mensaje, ref, titulo, url } = req.body;
 
   const html = `

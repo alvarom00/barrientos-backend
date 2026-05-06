@@ -6,6 +6,11 @@ import dotenv from "dotenv";
 import seoRoutes from "./routes/seo";
 import multer from "multer";
 import aiRoutes from "./routes/ai.routes";
+import {
+  globalLimiter,
+  aiLimiter,
+  authLimiter,
+} from "./middleware/rateLimit";
 
 import propertyRoutes from "./routes/property.routes";
 import authRoutes from "./routes/auth";
@@ -51,6 +56,9 @@ app.options(/^\/api\/.*$/, corsMw);
 app.use(helmet());
 app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 app.use(express.json({ limit: "2mb" }));
+app.use(globalLimiter);
+app.use("/api/ai", aiLimiter, aiRoutes);
+app.use("/api/auth", authLimiter, authRoutes);
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
